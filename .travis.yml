@@ -3,10 +3,16 @@ language: C
 os:
   - linux
   - osx
-  - windows
+  # - windows
 
-before_install:
-  - sudo apt-get install -y libportmidi-dev
+before_install: |
+  if [ "$TRAVIS_OS_NAME" == "linux" ]; then
+    sudo apt-get install -y libportmidi-dev
+  elif [ "$TRAVIS_OS_NAME" == "osx" ]; then
+    brew install portmidi
+  elif [ "$TRAVIS_OS_NAME" == "windows" ]; then
+    echo "not yet supported"
+  fi
 
 script:
   - ./tool --portmidi build release orca
