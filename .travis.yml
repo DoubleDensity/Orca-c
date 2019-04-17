@@ -9,9 +9,10 @@ os:
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cd portmidi; ls; fi  
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/Windows/System32/cmd.exe /c make.bat; fi
+  
+  #- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; cd portmidi; /c/Windows/System32/cmd.exe /c make.bat; fi
 
 script:
-  - ./tool --portmidi build release orca
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then ./tool --portmidi build release orca; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then ./tool --portmidi build release orca; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then make -I/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/opt/include
