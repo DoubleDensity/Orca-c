@@ -9,7 +9,7 @@ os:
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin; setup-x86.exe -q -P portmidi,ncurses; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin; setup-x86.exe -P portmidi,ncurses; fi
 
 script:
   - ./tool --portmidi build release orca
