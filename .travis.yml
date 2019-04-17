@@ -9,9 +9,6 @@ os:
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
-  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin; fi
-  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then ls /c/tools/cygwin; fi
-  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/cygwinsetup.exe -P ncurses,portmidi; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cd portmidi; ls; fi  
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/Windows/System32/cmd.exe /C make.bat; fi
