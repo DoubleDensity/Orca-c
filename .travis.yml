@@ -11,7 +11,7 @@ before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then ls /c/tools/cygwin; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/setup-x86.exe --help; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/cygwinsetup.exe -p -P ncurses,portmidi; fi
 
 script:
   - ./tool --portmidi build release orca
