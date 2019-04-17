@@ -11,7 +11,7 @@ before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cd portmidi; ls; fi  
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/Windows/System32/cmd.exe /C make.bat; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/Windows/System32/cmd.exe /c make.bat; fi
 
 script:
   - ./tool --portmidi build release orca
