@@ -13,6 +13,6 @@ before_install:
   #- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; cd portmidi; /c/Windows/System32/cmd.exe /c make.bat; fi
 
 script:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then ./tool --portmidi build release orca; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then ./tool --portmidi build release orca; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then make -I/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/opt/include
+  - echo $TRAVIS_OS_NAME
+  - uname -s | awk '{print tolower($0)}'
+  - ./tool --portmidi build release orca
