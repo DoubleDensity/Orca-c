@@ -13,7 +13,5 @@ before_install:
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cd portmidi; ls; fi  
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/Windows/System32/cmd.exe /C make.bat; fi
 
-git@github.com:philandstuff/portmidi.git
-
 script:
   - ./tool --portmidi build release orca
