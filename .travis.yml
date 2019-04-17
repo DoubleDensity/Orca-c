@@ -10,7 +10,7 @@ before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
   
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; cd portmidi; make install; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then pacman -S make; git clone https://github.com/philandstuff/portmidi.git; cd portmidi; make install; fi
 
 script:
   - echo $TRAVIS_OS_NAME
