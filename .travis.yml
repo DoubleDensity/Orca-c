@@ -23,7 +23,7 @@ script:
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -c './tool build release orca'; fi
   # - ./tool --portmidi build release orca
   # - ls -R
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Get-Location'; fi
+  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Get-Location'; fi
 #  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -File 'ci\travis_build.ps1'; fi
 
 # language: C
