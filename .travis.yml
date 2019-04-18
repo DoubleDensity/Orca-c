@@ -9,18 +9,17 @@ os:
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi  
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/ProgramData/chocolatey/bin/cyg-get.bat ncurses portmidi; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Set-ExecutionPolicy -ExecutionPolicy RemoteSigned'; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat ncurses portmidi; fi
+#  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Set-ExecutionPolicy -ExecutionPolicy RemoteSigned'; fi
 
 
 
 script:
-  - echo $TRAVIS_OS_NAME
-  - uname -s | awk '{print tolower($0)}'
+  # - echo $TRAVIS_OS_NAME
+  # - uname -s | awk '{print tolower($0)}'
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
-
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Get-Location'; fi
+  - ls -R
+  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Get-Location'; fi
 #  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -File 'ci\travis_build.ps1'; fi
 
 # language: C
