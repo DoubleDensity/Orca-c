@@ -20,7 +20,7 @@ script:
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
   
   # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then ls -R /c/tools/cygwin; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc ./tool --portmidi build release orca; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc $(pwd)/tool --portmidi build release orca; fi
   # - ./tool --portmidi build release orca
   # - ls -R
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Get-Location'; fi
