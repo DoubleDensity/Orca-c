@@ -16,7 +16,7 @@ script:
   - echo $TRAVIS_OS_NAME
   - uname -s | awk '{print tolower($0)}'
   - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then ci/travis_build.bat; fi
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then powershell ci/travis_build.ps1; fi
 
 # language: C
 # sudo: true
