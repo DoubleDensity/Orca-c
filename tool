@@ -38,7 +38,6 @@ case $(uname -s | awk '{print tolower($0)}') in
   linux*) os=linux;;
   darwin*) os=mac;;
   cygwin*) os=cygwin;;
-  msys*) os=cygwin;;
   *bsd*) os=bsd;;
   *) os=unknown;;
 esac
