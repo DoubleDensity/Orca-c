@@ -28,7 +28,6 @@ sudo: true
 jobs:
   include:
     - stage: build macos
-      language: C
       os: osx
       before_install:
         - brew install portmidi ncurses
@@ -45,8 +44,6 @@ jobs:
           all_branches: true
 
     - stage: build linux
-      language: C
-      sudo: true
       os: osx
       before_install:
         - sudo apt-get install -y libportmidi-dev
@@ -63,7 +60,6 @@ jobs:
           all_branches: true
 
     - stage: build windows
-      language: C
       os: osx
       before_install:
         - choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel
