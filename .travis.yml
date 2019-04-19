@@ -1,51 +1,27 @@
 language: C
 sudo: true
-
 os:
-  - linux
-  - osx
-  - windows
-
+- linux
+- osx
+- windows
 before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi  
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel; fi
-#  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Set-ExecutionPolicy -ExecutionPolicy RemoteSigned'; fi
-
-
-
+- if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev;
+  fi
+- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
+- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat
+  gcc-core libncurses-devel libportmidi-devel; fi
 script:
-  # - echo $TRAVIS_OS_NAME
-  # - uname -s | awk '{print tolower($0)}'
-  - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
-  
-  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then ls -al /c/tools/cygwin/bin; fi
-  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc '(set -x && pushd $TRAVIS_BUILD_DIR && cat tool)'; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build release orca)'; fi
-  # - ./tool --portmidi build release orca
-  - ls -R
-  # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -Command 'Get-Location'; fi
-#  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PowerShell -File 'ci\travis_build.ps1'; fi
-
-# language: C
-# sudo: true
-
-# os:
-#   - linux
-#   - osx
-#   - windows
-
-# before_install:
-#   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
-#   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
-#   # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin; fi
-#   # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then ls /c/tools/cygwin; fi
-#   # - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/cygwinsetup.exe -P ncurses,portmidi; fi
-#   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then git clone https://github.com/philandstuff/portmidi.git; fi
-#   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then cd portmidi; ls; fi  
-#   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/Windows/System32/cmd.exe /C make.bat; fi
-
-# git@github.com:philandstuff/portmidi.git
-
-# script:
-#   - ./tool --portmidi build release orca
+- if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca;
+  fi
+- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc '(gcc
+  --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build
+  release orca)'; fi
+- ls -R
+deploy:
+  provider: releases
+  api_key:
+    secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
+  file: build/release/orca*
+  on:
+    repo: DoubleDensity/Orca-c
+    branch: travis-ci
