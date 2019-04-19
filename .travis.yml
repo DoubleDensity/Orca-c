@@ -8,14 +8,15 @@ jobs:
         - brew install portmidi ncurses
       script:
         - ./tool --portmidi build release orca
+        - mv -v build/release/orca orca-linux-amd64
       deploy:
         provider: releases
         draft: true
         skip_cleanup: true
         api_key:
           secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
-        file_glob: true
-        file: build/release/orca*
+        # file_glob: true
+        file: orca-linux-amd64
         on:
           # branch: master
           all_branches: true
@@ -27,14 +28,15 @@ jobs:
         - sudo apt-get install -y libportmidi-dev
       script:
         - ./tool --portmidi build release orca
+        - mv -v build/release/orca orca-darwin-amd64
       deploy:
         provider: releases
         draft: true
         skip_cleanup: true
         api_key:
           secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
-        file_glob: true
-        file: build/release/orca*
+        # file_glob: true
+        file: orca-darwin-amd64
         on:
           # branch: master
           all_branches: true
@@ -45,14 +47,15 @@ jobs:
         - choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel
       script:
         - /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build release orca)'
+        - mv -v build/release/orca.exe orca-windows-amd64.exe
       deploy:
         provider: releases
         draft: false
         skip_cleanup: true
         api_key:
           secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
-        file_glob: true
-        file: build/release/orca*
+        # file_glob: true
+        file: orca-windows-amd64.exe
         on:
           # branch: master
           all_branches: true          
