@@ -1,24 +1,80 @@
 language: C
 sudo: true
-os:
-- linux
-- osx
-- windows
+# os:
+# - linux
+# - osx
+# - windows
 
-before_install:
-- if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
-- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
-- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel; fi
+# before_install:
+# - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
+# - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
+# - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel; fi
 
-script:
-- if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
-- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build release orca)'; fi
+# script:
+# - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
+# - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build release orca)'; fi
 
-deploy:
-  provider: releases
-  api_key:
-    secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
-  file: build/release/orca*
-  on:
-    repo: DoubleDensity/Orca-c
-    branch: travis-ci
+# deploy:
+#   provider: releases
+#   api_key:
+#     secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
+#   file: build/release/orca*
+#   on:
+#     repo: DoubleDensity/Orca-c
+#     branch: travis-ci
+
+
+
+jobs:
+  include:
+    - stage: build macos
+      language: C
+      os: osx
+      before_install:
+        - brew install portmidi ncurses
+      script:
+        - ./tool --portmidi build release orca
+      deploy:
+        provider: releases
+        draft: true
+        skip_cleanup: true
+        api_key:
+          secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
+        file: build/release/orca*
+        on:
+          all_branches: true
+
+    - stage: build linux
+      language: C
+      sudo: true
+      os: osx
+      before_install:
+        - sudo apt-get install -y libportmidi-dev
+      script:
+        - ./tool --portmidi build release orca
+      deploy:
+        provider: releases
+        draft: true
+        skip_cleanup: true
+        api_key:
+          secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
+        file: build/release/orca*
+        on:
+          all_branches: true
+
+    - stage: build windows
+      language: C
+      os: osx
+      before_install:
+        - choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel
+      script:
+        - /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build release orca)'
+      deploy:
+        provider: releases
+        draft: false
+        skip_cleanup: true
+        api_key:
+          secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
+        file: build/release/orca*
+        on:
+          all_branches: true          
