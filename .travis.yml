@@ -16,6 +16,7 @@ jobs:
         - mv -v build/release/orca orca-linux-amd64
       deploy:
         provider: releases
+        name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
         draft: true
         skip_cleanup: true
         api_key:
@@ -36,6 +37,7 @@ jobs:
         - mv -v build/release/orca orca-darwin-amd64
       deploy:
         provider: releases
+        name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
         draft: true
         skip_cleanup: true
         api_key:
@@ -55,7 +57,7 @@ jobs:
         - mv -v build/release/orca.exe orca-windows-amd64.exe
       deploy:
         provider: releases
-        name: Build $(date +'%d.%m.%Y %R')
+        name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
         draft: false
         skip_cleanup: true
         api_key:
