@@ -7,16 +7,15 @@ os:
 
 stages:
   - build
-  - name: deploy
-
-before_install:
-- if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
-- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
-- if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel; fi
+  - deploy
 
 jobs:
   include:
     - stage: build
+      before_install:
+      - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libportmidi-dev; fi
+      - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install portmidi ncurses; fi
+      - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel; fi
       script:
       - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then ./tool --portmidi build release orca; fi
       - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool --portmidi build release orca)'; fi
