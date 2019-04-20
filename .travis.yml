@@ -13,7 +13,7 @@ jobs:
         - brew install portmidi ncurses
       script:
         - ./tool --portmidi build release orca
-        - mv -v build/release/orca orca_c-linux-amd64
+        - mv -v build/release/orca orca_c-darwin-amd64
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
@@ -34,7 +34,7 @@ jobs:
         - sudo apt-get install -y libportmidi-dev
       script:
         - ./tool --portmidi build release orca
-        - mv -v build/release/orca orca_c-darwin-amd64
+        - mv -v build/release/orca orca_c-linux-amd64
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
