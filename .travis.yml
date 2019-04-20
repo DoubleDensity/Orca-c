@@ -22,7 +22,7 @@ jobs:
         api_key:
           secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
         # file_glob: true
-        file: orca_c-linux-amd64
+        file: orca_c-darwin-amd64
         on:
           # branch: master
           all_branches: true
@@ -43,7 +43,7 @@ jobs:
         api_key:
           secure: BfscZ7yEFnqwpKJlv94Zyi437qF2gKe3YRG4wP6hvznbWGglpdzNl5VolLeYSADEBXQpGZ2/epTgpeYd5PPqMAU0mOW0e0dRI7JUINlN9D5B4l0R0qFyIINFJWmYFHTTejcfQdIdU90SHHUro85ScLw+pR6mY38+EWrHmeOjeVci2QYsiy0qTn6RgomB1h7vbptArBUbLkeSdHMP0SiyXEDQGfuCXD6ibGrQCS2kb1VWhvwQT+K0xRyCSZ6h/zHEPUQyu8BOhBefSdCjdwkcZmhGSnhxrqOkI12FkqED+6R7z8yr1m3uKpS4IcBI58mCr8cMysD/qCyDE1ARYqRwjpyZhwkf4nkdegPAQpYSOLjt1WHG9D4nYFv1hIkThrhdXWWh4uYgCHjdvfvhnUAFRieUDN1/sIQsoHzPEmLJh1EDPVff/WBhGsUZJR32yshwHB/Y1hOfEg9KRNUb7IdFJ9O6pLH9Cv65iDZimXbLikaS2ibftLbsIVfaVpeQuA1yPOMoSWve40QVRqKISTIrVLWQoGJgO3YqrkEcmjPpwmIJPiwwBkhEHEN8WfiGR0l6p49r/SgWNfDa48s0qey6p76+D+L6mxUEs9gqcIG6asTRfEXnvTuEriLIrx3mLnyorxoix4Vx7sq8GAbnRzwD5vLmQby8JD4F5DNzcf6xo4U=
         # file_glob: true
-        file: orca_c-darwin-amd64
+        file: orca_c-linux-amd64
         on:
           # branch: master
           all_branches: true
