@@ -54,7 +54,7 @@ jobs:
       sudo: true
       script:
         - "docker run -i -v \"${PWD}:/orca\" --workdir=/orca i386/ubuntu:14.04 /bin/bash -c \"apt-get -y update && apt-get install -y gcc libncurses-dev libncursesw5-dev libportmidi-dev && linux32 --32bit i386 ./tool --portmidi build release orca\""
-        - mv -v build/release/orca orca_c-linux-i386
+        - sudo mv -v build/release/orca orca_c-linux-i386
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
