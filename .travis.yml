@@ -3,6 +3,7 @@ language: C
 stages:
   - build_macos
   - build_linux
+  - build_linux_i386
   - build_windows
 
 jobs:
