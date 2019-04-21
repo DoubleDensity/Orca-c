@@ -53,7 +53,7 @@ jobs:
       os: linux
       sudo: true
       script:
-        - "docker run -i -v \"${PWD}:/ocra\" i386/ubuntu /bin/bash -c \"apt-get install -y libportmidi-dev && linux32 --32bit i386 /orca/tool --portmidi build release orca\""
+        - "docker run -i -v \"${PWD}:/ocra\" i386/ubuntu /bin/bash -c \"apt-get -y update && apt-get install -y libportmidi-dev && linux32 --32bit i386 /orca/tool --portmidi build release orca\""
         - mv -v build/release/orca orca_c-linux-i386
       deploy:
         provider: releases
