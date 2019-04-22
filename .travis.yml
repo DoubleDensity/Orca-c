@@ -28,14 +28,12 @@ jobs:
           # branch: master
           all_branches: true
 
-    - stage: build_linux
+    - stage: build_linux_amd64
       os: linux
       sudo: true
-      before_install:
-        - sudo apt-get install -y libportmidi-dev
       script:
-        - ./tool --portmidi build release orca
-        - mv -v build/release/orca orca_c-linux-amd64
+        - "docker run -i -v \"${PWD}:/orca\" --workdir=/orca ubuntu:14.04 /bin/bash -c \"apt-get -y update && apt-get install -y gcc libncurses-dev libncursesw5-dev libportmidi-dev && ./tool --portmidi build release orca\""
+        - sudo mv -v build/release/orca orca_c-linux-amd64
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
