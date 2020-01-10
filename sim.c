@@ -1,6 +1,5 @@
 #include "sim.h"
 #include "gbuffer.h"
-#include "mark.h"
 
 //////// Utilities
 
@@ -50,7 +49,7 @@ static Usz index_of(Glyph c) {
 #else
 // Reference implementation
 static Usz index_of(Glyph c) {
-  if (c == '.')
+  if (c == '.' || c == '*')
     return 0;
   if (c >= '0' && c <= '9')
     return (Usz)(c - '0');
@@ -72,6 +71,14 @@ static inline Glyph glyph_of(Usz index) {
 static inline bool glyph_is_lowercase(Glyph g) { return g & (1 << 5); }
 static inline Glyph glyph_lowered_unsafe(Glyph g) {
   return (Glyph)(g | (1 << 5));
+}
+static inline Glyph glyph_with_case(Glyph g, Glyph caser) {
+  enum {
+    Case_bit = 1 << 5,
+    Alpha_bit = 1 << 6,
+  };
+  return (Glyph)((g & ~Case_bit) | ((~g & Alpha_bit) >> 1) |
+                 (caser & Case_bit));
 }
 
 ORCA_PURE static bool oper_has_neighboring_bang(Glyph const* gbuf, Usz h, Usz w,
@@ -140,8 +147,8 @@ static ORCA_FORCE_NO_INLINE U8 midi_velocity_of(Glyph g) {
 
 typedef struct {
   Glyph* vars_slots;
-  Piano_bits piano_bits;
   Oevent_list* oevent_list;
+  Usz random_seed;
 } Oper_extra_params;
 
 static void oper_poke_and_stun(Glyph* restrict gbuffer, Mark* restrict mbuffer,
@@ -212,7 +219,7 @@ static void oper_poke_and_stun(Glyph* restrict gbuffer, Mark* restrict mbuffer,
 //////// Operators
 
 #define UNIQUE_OPERATORS(_)                                                    \
-  _('!', keys)                                                                 \
+  _('!', midicc)                                                               \
   _('#', comment)                                                              \
   _('*', bang)                                                                 \
   _(':', midi)                                                                 \
@@ -221,7 +228,7 @@ static void oper_poke_and_stun(Glyph* restrict gbuffer, Mark* restrict mbuffer,
 
 #define ALPHA_OPERATORS(_)                                                     \
   _('A', add)                                                                  \
-  _('B', banger)                                                               \
+  _('B', bounce)                                                               \
   _('C', clock)                                                                \
   _('D', delay)                                                                \
   _('E', movement)                                                             \
@@ -231,8 +238,8 @@ static void oper_poke_and_stun(Glyph* restrict gbuffer, Mark* restrict mbuffer,
   _('I', increment)                                                            \
   _('J', jump)                                                                 \
   _('K', konkat)                                                               \
-  _('L', loop)                                                                 \
-  _('M', modulo)                                                               \
+  _('L', lesser)                                                               \
+  _('M', multiply)                                                             \
   _('N', movement)                                                             \
   _('O', offset)                                                               \
   _('P', push)                                                                 \
@@ -240,16 +247,12 @@ static void oper_poke_and_stun(Glyph* restrict gbuffer, Mark* restrict mbuffer,
   _('R', random)                                                               \
   _('S', movement)                                                             \
   _('T', track)                                                                \
-  _('U', uturn)                                                                \
+  _('U', uclid)                                                                \
   _('V', variable)                                                             \
   _('W', movement)                                                             \
   _('X', teleport)                                                             \
   _('Y', yump)                                                                 \
-  _('Z', zig)
-
-#define MOVEMENT_CASES                                                         \
-  'N' : case 'n' : case 'E' : case 'e' : case 'S' : case 's' : case 'W'        \
-      : case 'w'
+  _('Z', lerp)
 
 BEGIN_OPERATOR(movement)
   if (glyph_is_lowercase(This_oper_char) &&
@@ -295,21 +298,8 @@ BEGIN_OPERATOR(movement)
   }
 END_OPERATOR
 
-BEGIN_OPERATOR(keys)
-  PORT(0, 1, IN);
-  PORT(1, 0, OUT);
-  Glyph g = PEEK(0, 1);
-  Piano_bits pb = piano_bits_of(g);
-  // instead of this extra branch, could maybe just leave output port unlocked
-  // so the '*' goes away on its own?
-  if (pb == ORCA_PIANO_BITS_NONE)
-    return;
-  Glyph o;
-  if (ORCA_LIKELY((pb & extra_params->piano_bits) == ORCA_PIANO_BITS_NONE))
-    o = '.';
-  else
-    o = '*';
-  POKE(1, 0, o);
+BEGIN_OPERATOR(midicc)
+  // TODO unimplemented
 END_OPERATOR
 
 BEGIN_OPERATOR(comment)
@@ -417,30 +407,26 @@ END_OPERATOR
 
 BEGIN_OPERATOR(add)
   LOWERCASE_REQUIRES_BANG;
+  PORT(0, -1, IN | PARAM);
   PORT(0, 1, IN);
-  PORT(0, 2, IN);
   PORT(1, 0, OUT);
-  Usz a = index_of(PEEK(0, 1));
-  Usz b = index_of(PEEK(0, 2));
-  POKE(1, 0, indexed_glyphs[(a + b) % Glyphs_index_count]);
+  Glyph a = PEEK(0, -1);
+  Glyph b = PEEK(0, 1);
+  Glyph g = indexed_glyphs[(index_of(a) + index_of(b)) % Glyphs_index_count];
+  POKE(1, 0, glyph_with_case(g, b));
 END_OPERATOR
 
-BEGIN_OPERATOR(banger)
+BEGIN_OPERATOR(bounce)
   LOWERCASE_REQUIRES_BANG;
-  PORT(0, 1, IN | NONLOCKING);
+  PORT(0, -1, IN | PARAM);
+  PORT(0, 1, IN);
   PORT(1, 0, OUT);
-  Glyph g = PEEK(0, 1);
-  Glyph result;
-  switch (g) {
-  case '1':
-  case '*':
-  case MOVEMENT_CASES:
-    result = '*';
-    break;
-  default:
-    result = '.';
-  }
-  POKE(1, 0, result);
+  Glyph a = PEEK(0, -1);
+  Glyph b = PEEK(0, 1);
+  Isz val = (Isz)index_of(b) - (Isz)index_of(a);
+  if (val < 0)
+    val = -val;
+  POKE(1, 0, glyph_with_case(glyph_of((Usz)val), b));
 END_OPERATOR
 
 BEGIN_OPERATOR(clock)
@@ -453,7 +439,7 @@ BEGIN_OPERATOR(clock)
   if (rate == 0)
     rate = 1;
   if (mod_num == 0)
-    mod_num = 10;
+    mod_num = 8;
   Glyph g = glyph_of(Tick_number / rate % mod_num);
   POKE(1, 0, g);
 END_OPERATOR
@@ -468,18 +454,18 @@ BEGIN_OPERATOR(delay)
   if (rate == 0)
     rate = 1;
   if (mod_num == 0)
-    mod_num = 10;
+    mod_num = 8;
   Glyph g = Tick_number % (rate * mod_num) == 0 ? '*' : '.';
   POKE(1, 0, g);
 END_OPERATOR
 
 BEGIN_OPERATOR(if)
   LOWERCASE_REQUIRES_BANG;
+  PORT(0, -1, IN | PARAM);
   PORT(0, 1, IN);
-  PORT(0, 2, IN);
   PORT(1, 0, OUT);
-  Glyph g0 = PEEK(0, 1);
-  Glyph g1 = PEEK(0, 2);
+  Glyph g0 = PEEK(0, -1);
+  Glyph g1 = PEEK(0, 1);
   POKE(1, 0, g0 == g1 ? '*' : '.');
 END_OPERATOR
 
@@ -506,25 +492,19 @@ END_OPERATOR
 
 BEGIN_OPERATOR(increment)
   LOWERCASE_REQUIRES_BANG;
+  PORT(0, -1, IN | PARAM);
   PORT(0, 1, IN);
-  PORT(0, 2, IN);
   PORT(1, 0, IN | OUT);
-  Usz a = index_of(PEEK(0, 1));
-  Usz b = index_of(PEEK(0, 2));
+  Glyph g = PEEK(0, -1);
+  Usz rate = 1;
+  if (g != '.' && g != '*')
+    rate = index_of(g);
+  Usz max = index_of(PEEK(0, 1));
   Usz val = index_of(PEEK(1, 0));
-  if (a < b) {
-    if (val < a || val >= b - 1)
-      val = a;
-    else
-      ++val;
-  } else if (a > b) {
-    if (val <= b || val > a)
-      val = a - 1;
-    else
-      --val;
-  } else {
-    return;
-  }
+  if (max == 0)
+    max = 36;
+  val = val + rate;
+  val = val % max;
   POKE(1, 0, glyph_of(val));
 END_OPERATOR
 
@@ -546,10 +526,10 @@ BEGIN_OPERATOR(konkat)
   for (Isz i = 0; i < len; ++i) {
     PORT(0, i + 1, IN);
     Glyph var = PEEK(0, i + 1);
-    Usz var_idx = safe_index_of(var);
-    if (var_idx != 0) {
-      Glyph result = extra_params->vars_slots[var_idx];
-      if (result != '.') {
+    if (var != '.') {
+      Usz var_idx = safe_index_of(var);
+      if (var_idx != 0) {
+        Glyph result = extra_params->vars_slots[var_idx];
         PORT(1, i + 1, OUT);
         POKE(1, i + 1, result);
       }
@@ -557,38 +537,32 @@ BEGIN_OPERATOR(konkat)
   }
 END_OPERATOR
 
-BEGIN_OPERATOR(loop)
+BEGIN_OPERATOR(lesser)
   LOWERCASE_REQUIRES_BANG;
   PORT(0, -1, IN | PARAM);
-  Usz len = safe_index_of(PEEK(0, -1));
-  if (len > width - x - 1)
-    len = width - x - 1;
-  Mark* m = mbuffer + y * width + x + 1;
-  for (Usz i = 0; i < len; ++i) {
-    m[i] |= (Mark_flag_lock | Mark_flag_sleep);
-  }
-  if (len == 0)
-    return;
-  Glyph buff[Glyphs_index_count];
-  Glyph* gs = gbuffer + y * width + x + 1;
-  Glyph hopped = *gs;
-  for (Usz i = 0; i < len; ++i) {
-    buff[i] = gs[i + 1];
-  }
-  buff[len - 1] = hopped;
-  for (Usz i = 0; i < len; ++i) {
-    gs[i] = buff[i];
+  PORT(0, 1, IN);
+  PORT(1, 0, OUT);
+  Glyph ga = PEEK(0, -1);
+  Glyph gb = PEEK(0, 1);
+  if (ga == '.' || gb == '.') {
+    POKE(1, 0, '.');
+  } else {
+    Usz ia = index_of(ga);
+    Usz ib = index_of(gb);
+    Usz out = ia < ib ? ia : ib;
+    POKE(1, 0, glyph_with_case(glyph_of(out), gb));
   }
 END_OPERATOR
 
-BEGIN_OPERATOR(modulo)
+BEGIN_OPERATOR(multiply)
   LOWERCASE_REQUIRES_BANG;
+  PORT(0, -1, IN | PARAM);
   PORT(0, 1, IN);
-  PORT(0, 2, IN);
   PORT(1, 0, OUT);
-  Usz ia = index_of(PEEK(0, 1));
-  Usz ib = index_of(PEEK(0, 2));
-  POKE(1, 0, indexed_glyphs[ib == 0 ? 0 : (ia % ib)]);
+  Glyph a = PEEK(0, -1);
+  Glyph b = PEEK(0, 1);
+  Glyph g = indexed_glyphs[(index_of(a) * index_of(b)) % Glyphs_index_count];
+  POKE(1, 0, glyph_with_case(g, b));
 END_OPERATOR
 
 BEGIN_OPERATOR(offset)
@@ -637,23 +611,15 @@ BEGIN_OPERATOR(query)
   }
 END_OPERATOR
 
-static Usz hash32_shift_mult(Usz key) {
-  Usz c2 = UINT32_C(0x27d4eb2d);
-  key = (key ^ UINT32_C(61)) ^ (key >> UINT32_C(16));
-  key = key + (key << UINT32_C(3));
-  key = key ^ (key >> UINT32_C(4));
-  key = key * c2;
-  key = key ^ (key >> UINT32_C(15));
-  return key;
-}
-
 BEGIN_OPERATOR(random)
   LOWERCASE_REQUIRES_BANG;
+  PORT(0, -1, IN | PARAM);
   PORT(0, 1, IN);
-  PORT(0, 2, IN);
   PORT(1, 0, OUT);
-  Usz a = index_of(PEEK(0, 1));
-  Usz b = index_of(PEEK(0, 2));
+  Usz a = index_of(PEEK(0, -1));
+  Usz b = index_of(PEEK(0, 1));
+  if (b == 0)
+    b = 36;
   Usz min, max;
   if (a == b) {
     POKE(1, 0, glyph_of(a));
@@ -665,8 +631,16 @@ BEGIN_OPERATOR(random)
     min = b;
     max = a;
   }
-  Usz key = y * width + x;
-  key = hash32_shift_mult((y * width + x) ^ (Tick_number << UINT32_C(16)));
+  // Initial input params for the hash
+  Usz key = (extra_params->random_seed + y * width + x) ^
+            (Tick_number << UINT32_C(16));
+  // 32-bit shift_mult hash to evenly distribute bits
+  key = (key ^ UINT32_C(61)) ^ (key >> UINT32_C(16));
+  key = key + (key << UINT32_C(3));
+  key = key ^ (key >> UINT32_C(4));
+  key = key * UINT32_C(0x27d4eb2d);
+  key = key ^ (key >> UINT32_C(15));
+  // Hash finished. Restrict to desired range of numbers.
   Usz val = key % (max - min) + min;
   POKE(1, 0, glyph_of(val));
 END_OPERATOR
@@ -688,34 +662,23 @@ BEGIN_OPERATOR(track)
   POKE(1, 0, PEEK(0, read_val_x));
 END_OPERATOR
 
-static Isz const uturn_data[] = {
-    // clang-format off
-  -1,  0, (Isz)'N',
-   0, -1, (Isz)'W',
-   0,  1, (Isz)'E',
-   1,  0, (Isz)'S',
-    // clang-format on
-};
-
-enum {
-  Uturn_per = 3,
-  Uturn_loop_limit = Uturn_per * 4,
-};
-
-BEGIN_OPERATOR(uturn)
+// https://www.computermusicdesign.com/
+// simplest-euclidean-rhythm-algorithm-explained/
+BEGIN_OPERATOR(uclid)
   LOWERCASE_REQUIRES_BANG;
-  for (Usz i = 0; i < Uturn_loop_limit; i += Uturn_per) {
-    PORT(uturn_data[i + 0], uturn_data[i + 1], IN | OUT | PARAM | NONLOCKING);
-  }
-  for (Usz i = 0; i < Uturn_loop_limit; i += Uturn_per) {
-    Isz dy = uturn_data[i + 0];
-    Isz dx = uturn_data[i + 1];
-    Glyph g = PEEK(dy, dx);
-    switch (g) {
-    case MOVEMENT_CASES:
-      POKE(dy, dx, (Glyph)uturn_data[i + 2]);
-    }
-  }
+  PORT(0, -1, IN | PARAM);
+  PORT(0, 1, IN);
+  PORT(1, 0, OUT);
+  Glyph left = PEEK(0, -1);
+  Usz steps = 1;
+  if (left != '.' && left != '*')
+    steps = index_of(left);
+  Usz max = index_of(PEEK(0, 1));
+  if (max == 0)
+    max = 8;
+  Usz bucket = (steps * (Tick_number + max - 1)) % max + steps;
+  Glyph g = (bucket >= max) ? '*' : '.';
+  POKE(1, 0, g);
 END_OPERATOR
 
 BEGIN_OPERATOR(variable)
@@ -724,22 +687,16 @@ BEGIN_OPERATOR(variable)
   PORT(0, 1, IN | PARAM);
   Glyph left = PEEK(0, -1);
   Glyph right = PEEK(0, 1);
-  if (right == '.') {
-    PORT(1, 0, OUT);
-    return;
-  }
-  if (left == '.') {
+  if (left != '.') {
+    // Write
+    Usz var_idx = safe_index_of(left);
+    extra_params->vars_slots[var_idx] = right;
+  } else if (right != '.') {
     // Read
     PORT(1, 0, OUT);
     Usz var_idx = safe_index_of(right);
     Glyph result = extra_params->vars_slots[var_idx];
-    if (result == '.')
-      return;
     POKE(1, 0, result);
-  } else {
-    // Write
-    Usz var_idx = safe_index_of(left);
-    extra_params->vars_slots[var_idx] = right;
   }
 END_OPERATOR
 
@@ -761,41 +718,33 @@ BEGIN_OPERATOR(yump)
   POKE(0, 1, PEEK(0, -1));
 END_OPERATOR
 
-BEGIN_OPERATOR(zig)
+BEGIN_OPERATOR(lerp)
   LOWERCASE_REQUIRES_BANG;
-  Glyph* gline = gbuffer + width * y;
-  gline[x] = '.';
-  if (x + 1 == width)
-    return;
-  if (gline[x + 1] == '.') {
-    gline[x + 1] = This_oper_char;
-    mbuffer[width * y + x + 1] |= (U8)Mark_flag_sleep;
-  } else {
-    Usz n = 256;
-    if (x < n)
-      n = x;
-    for (Usz i = 0; i < n; ++i) {
-      if (gline[x - i - 1] != '.') {
-        gline[x - i] = This_oper_char;
-        break;
-      }
-    }
-  }
+  PORT(0, -1, IN | PARAM);
+  PORT(0, 1, IN);
+  PORT(1, 0, IN | OUT);
+  Glyph g = PEEK(0, -1);
+  Isz rate = 1;
+  if (g != '.' && g != '*')
+    rate = (Isz)index_of(g);
+  Isz target = (Isz)index_of(PEEK(0, 1));
+  Isz val = (Isz)index_of(PEEK(1, 0));
+  Isz mod = (val <= target - rate)
+                ? rate
+                : ((val >= target + rate) ? -rate : target - val);
+  POKE(1, 0, glyph_of((Usz)(val + mod)));
 END_OPERATOR
 
 //////// Run simulation
 
 void orca_run(Glyph* restrict gbuf, Mark* restrict mbuf, Usz height, Usz width,
-              Usz tick_number, Oevent_list* oevent_list,
-              Piano_bits piano_bits) {
+              Usz tick_number, Oevent_list* oevent_list, Usz random_seed) {
   Glyph vars_slots[Glyphs_index_count];
   memset(vars_slots, '.', sizeof(vars_slots));
-  mbuffer_clear(mbuf, height, width);
-  oevent_list_clear(oevent_list);
   Oper_extra_params extras;
   extras.vars_slots = &vars_slots[0];
-  extras.piano_bits = piano_bits;
   extras.oevent_list = oevent_list;
+  extras.random_seed = random_seed;
 
   for (Usz iy = 0; iy < height; ++iy) {
     Glyph const* glyph_row = gbuf + iy * width;

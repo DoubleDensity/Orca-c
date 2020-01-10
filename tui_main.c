@@ -2,9 +2,10 @@
 #include "base.h"
 #include "field.h"
 #include "gbuffer.h"
-#include "mark.h"
 #include "osc_out.h"
+#include "sdd.h"
 #include "sim.h"
+#include "sysmisc.h"
 #include "term_util.h"
 #include <getopt.h>
 #include <locale.h>
@@ -27,17 +28,18 @@ static void usage(void) {
   fprintf(stderr,
 "Usage: orca [options] [file]\n\n"
 "General options:\n"
-"    --margins <number>     Set cosmetic margins.\n"
-"                           Default: 2\n"
+"    --margins <nxn>        Set cosmetic margins.\n"
+"                           Default: 2x1\n"
 "    --undo-limit <number>  Set the maximum number of undo steps.\n"
 "                           If you plan to work with large files,\n"
 "                           set this to a low number.\n"
 "                           Default: 100\n"
 "    --initial-size <nxn>   When creating a new grid file, use these\n"
 "                           starting dimensions.\n"
-"                           Default: 57x25\n"
 "    --bpm <number>         Set the tempo (beats per minute).\n"
 "                           Default: 120\n"
+"    --seed <number>        Set the seed for the random function.\n"
+"                           Default: 1\n"
 "    -h or --help           Print this message and exit.\n"
 "\n"
 "OSC/MIDI options:\n"
@@ -61,17 +63,16 @@ static void usage(void) {
 #ifdef FEAT_PORTMIDI
 "\n"
 "    --portmidi-list-devices\n"
-"        List the MIDI output devices available through PortMIDI,\n"
+"        List the MIDI output devices available through PortMidi,\n"
 "        along with each associated device ID number, and then exit.\n"
 "        Do this to figure out which ID to use with\n"
 "        --portmidi-output-device\n"
 "\n"
 "    --portmidi-output-device <number>\n"
-"        Set MIDI to be sent via PortMIDI on a specified device ID.\n"
+"        Set MIDI to be sent via PortMidi on a specified device ID.\n"
 "        Example: 1\n"
 #endif
-      );
-  // clang-format on
+  ); // clang-format on
 }
 
 typedef enum {
@@ -117,26 +118,6 @@ static Glyph_class glyph_class_of(Glyph glyph) {
   if (glyph >= 'a' && glyph <= 'z')
     return Glyph_class_lowercase;
   return Glyph_class_unknown;
-}
-
-static bool is_valid_glyph(Glyph c) {
-  if (c >= '0' && c <= '9')
-    return true;
-  if (c >= 'A' && c <= 'Z')
-    return true;
-  if (c >= 'a' && c <= 'z')
-    return true;
-  switch (c) {
-  case '!':
-  case '.':
-  case '*':
-  case ':':
-  case ';':
-  case '=':
-  case '#':
-    return true;
-  }
-  return false;
 }
 
 static attr_t term_attrs_of_cell(Glyph g, Mark m) {
@@ -188,9 +169,9 @@ static attr_t term_attrs_of_cell(Glyph g, Mark m) {
 
 typedef enum {
   Ged_input_mode_normal = 0,
-  Ged_input_mode_append = 1,
-  Ged_input_mode_piano = 2,
-  Ged_input_mode_selresize = 3,
+  Ged_input_mode_append,
+  Ged_input_mode_selresize,
+  Ged_input_mode_slide,
 } Ged_input_mode;
 
 typedef struct {
@@ -431,58 +412,115 @@ void undo_history_apply(Undo_history* hist, Field* out_field,
 
 Usz undo_history_count(Undo_history* hist) { return hist->count; }
 
-void print_meter(WINDOW* win, float meter_level) {
-  enum { Segments = 7 };
-  int segs = (int)(meter_level * (float)Segments + 0.5f);
-  if (segs < 0)
-    segs = 0;
-  else if (segs > Segments)
-    segs = Segments;
+void print_activity_indicator(WINDOW* win, Usz activity_counter) {
+  // 7 segments that can each light up as Colors different colors.
+  // This gives us Colors^Segments total configurations.
+  enum { Segments = 7, Colors = 4 };
+  Usz states = 1; // calculate Colors^Segments
+  for (Usz i = 0; i < Segments; ++i)
+    states *= Colors;
+  // Wrap the counter to the range of displayable configurations.
+  Usz val = activity_counter % states;
+  chtype lamps[Colors];
+#if 1 // Appearance where segments are always lit
+  lamps[0] = ACS_HLINE | fg_bg(C_black, C_natural) | A_bold;
+  lamps[1] = ACS_HLINE | fg_bg(C_white, C_natural) | A_normal;
+  lamps[2] = ACS_HLINE | A_bold;
+  lamps[3] = lamps[1];
+#elif 0 // Brighter appearance where segments are always lit
+  lamps[0] = ACS_HLINE | fg_bg(C_black, C_natural) | A_bold;
+  lamps[1] = ACS_HLINE | A_normal;
+  lamps[2] = ACS_HLINE | A_bold;
+  lamps[3] = lamps[1];
+#else   // Appearance where segments can turn off completely
+  lamps[0] = ' ';
+  lamps[1] = ACS_HLINE | fg_bg(C_black, C_natural) | A_bold;
+  lamps[2] = ACS_HLINE | A_normal;
+  lamps[3] = lamps[1];
+#endif
   chtype buffer[Segments];
-  int i = 0;
-  for (; i < segs; ++i) {
-    buffer[i] = (i % 2 ? ACS_PLUS : ACS_HLINE) | A_REVERSE;
-  }
-  for (; i < Segments; ++i) {
-    buffer[i] = ACS_HLINE | A_DIM;
+  for (Usz i = 0; i < Segments; ++i) {
+    // Instead of a left-to-right, straightforward ascending least-to-most
+    // significant digits display, we'll display it as a spiral.
+    Usz j = i % 2 ? (6 - i / 2) : (i / 2);
+    buffer[j] = lamps[val % Colors];
+    val = val / Colors;
   }
   waddchnstr(win, buffer, Segments);
+  // If you want to see what various combinations of colors and attributes look
+  // like in different terminals.
+#if 0
+  waddch(win, 'a' | fg_bg(C_black, C_natural) | A_dim);
+  waddch(win, 'b' | fg_bg(C_black, C_natural) | A_normal);
+  waddch(win, 'c' | fg_bg(C_black, C_natural) | A_bold);
+  waddch(win, 'd' | A_dim);
+  waddch(win, 'e' | A_normal);
+  waddch(win, 'f' | A_bold);
+  waddch(win, 'g' | fg_bg(C_white, C_natural) | A_dim);
+  waddch(win, 'h' | fg_bg(C_white, C_natural) | A_normal);
+  waddch(win, 'i' | fg_bg(C_white, C_natural) | A_bold);
+#endif
+}
+
+void advance_faketab(WINDOW* win, int offset_x, int tabstop) {
+  if (tabstop < 1)
+    return;
+  int y, x, h, w;
+  getyx(win, y, x);
+  getmaxyx(win, h, w);
+  (void)h;
+  x = ((x + tabstop - 1) / tabstop) * tabstop + offset_x % tabstop;
+  if (w < 1)
+    w = 1;
+  if (x >= w)
+    x = w - 1;
+  wmove(win, y, x);
 }
 
 void draw_hud(WINDOW* win, int win_y, int win_x, int height, int width,
-              const char* filename, Usz field_h, Usz field_w,
+              char const* filename, Usz field_h, Usz field_w,
               Usz ruler_spacing_y, Usz ruler_spacing_x, Usz tick_num, Usz bpm,
-              Ged_cursor* const ged_cursor, Ged_input_mode input_mode,
-              float meter_level) {
+              Ged_cursor const* ged_cursor, Ged_input_mode input_mode,
+              Usz activity_counter) {
   (void)height;
   (void)width;
+  enum { Tabstop = 8 };
   wmove(win, win_y, win_x);
-  wprintw(win, "%dx%d\t%d/%d\t%df\t%d\t", (int)field_w, (int)field_h,
-          (int)ruler_spacing_x, (int)ruler_spacing_y, (int)tick_num, (int)bpm);
-  print_meter(win, meter_level);
+  wprintw(win, "%zux%zu", field_w, field_h);
+  advance_faketab(win, win_x, Tabstop);
+  wprintw(win, "%zu/%zu", ruler_spacing_x, ruler_spacing_y);
+  advance_faketab(win, win_x, Tabstop);
+  wprintw(win, "%zuf", tick_num);
+  advance_faketab(win, win_x, Tabstop);
+  wprintw(win, "%zu", bpm);
+  advance_faketab(win, win_x, Tabstop);
+  print_activity_indicator(win, activity_counter);
   wmove(win, win_y + 1, win_x);
-  wprintw(win, "%d,%d\t%d:%d\t", (int)ged_cursor->x, (int)ged_cursor->y,
-          (int)ged_cursor->w, (int)ged_cursor->h);
+  wprintw(win, "%zu,%zu", ged_cursor->x, ged_cursor->y);
+  advance_faketab(win, win_x, Tabstop);
+  wprintw(win, "%zu:%zu", ged_cursor->w, ged_cursor->h);
+  advance_faketab(win, win_x, Tabstop);
   switch (input_mode) {
   case Ged_input_mode_normal:
     wattrset(win, A_normal);
-    wprintw(win, "insert");
+    waddstr(win, "insert");
     break;
   case Ged_input_mode_append:
     wattrset(win, A_bold);
-    wprintw(win, "append");
-    break;
-  case Ged_input_mode_piano:
-    wattrset(win, A_reverse);
-    wprintw(win, "trigger");
+    waddstr(win, "append");
     break;
   case Ged_input_mode_selresize:
     wattrset(win, A_bold);
-    wprintw(win, "select");
+    waddstr(win, "select");
+    break;
+  case Ged_input_mode_slide:
+    wattrset(win, A_reverse);
+    waddstr(win, "slide");
     break;
   }
+  advance_faketab(win, win_x, Tabstop);
   wattrset(win, A_normal);
-  wprintw(win, "\t%s", filename);
+  waddstr(win, filename);
 }
 
 void draw_glyphs_grid(WINDOW* win, int draw_y, int draw_x, int draw_h,
@@ -511,6 +549,24 @@ void draw_glyphs_grid(WINDOW* win, int draw_y, int draw_x, int draw_h,
     return;
   bool use_rulers = ruler_spacing_y != 0 && ruler_spacing_x != 0;
   chtype bullet = ACS_BULLET;
+  enum { T = 1 << 0, B = 1 << 1, L = 1 << 2, R = 1 << 3 };
+  chtype rs[(T | B | L | R) + 1];
+  if (use_rulers) {
+    bool use_fancy_rulers = true;
+    for (Usz i = 0; i < sizeof rs / sizeof(chtype); ++i) {
+      rs[i] = '+';
+    }
+    if (use_fancy_rulers) {
+      rs[T | L] = ACS_ULCORNER;
+      rs[T | R] = ACS_URCORNER;
+      rs[B | L] = ACS_LLCORNER;
+      rs[B | R] = ACS_LRCORNER;
+      rs[T] = ACS_TTEE;
+      rs[B] = ACS_BTEE;
+      rs[L] = ACS_LTEE;
+      rs[R] = ACS_RTEE;
+    }
+  }
   for (Usz iy = 0; iy < rows; ++iy) {
     Usz line_offset = (offset_y + iy) * field_w + offset_x;
     Glyph const* g_row = gbuffer + line_offset;
@@ -521,10 +577,16 @@ void draw_glyphs_grid(WINDOW* win, int draw_y, int draw_x, int draw_h,
       Mark m = m_row[ix];
       chtype ch;
       if (g == '.') {
-        if (use_y_ruler && (ix + offset_x) % ruler_spacing_x == 0)
-          ch = '+';
-        else
+        if (use_y_ruler && (ix + offset_x) % ruler_spacing_x == 0) {
+          int p = 0; // clang-format off
+          if (iy + offset_y     == 0      ) p |= T;
+          if (iy + offset_y + 1 == field_h) p |= B;
+          if (ix + offset_x     == 0      ) p |= L;
+          if (ix + offset_x + 1 == field_w) p |= R;
+          ch = rs[p]; // clang-format on
+        } else {
           ch = bullet;
+        }
       } else {
         ch = (chtype)g;
       }
@@ -586,8 +648,8 @@ void draw_oevent_list(WINDOW* win, Oevent_list const* oevent_list) {
       Oevent_osc_ints const* eo = &ev->osc_ints;
       wprintw(win, "OSC\t%c\tcount: %d ", eo->glyph, eo->count, eo->count);
       waddch(win, ACS_VLINE);
-      for (Usz i = 0; i < eo->count; ++i) {
-        wprintw(win, " %d", eo->numbers[i]);
+      for (Usz j = 0; j < eo->count; ++j) {
+        wprintw(win, " %d", eo->numbers[j]);
       }
     } break;
     case Oevent_type_udp_string: {
@@ -691,6 +753,9 @@ typedef struct {
   PmDeviceID device_id;
   PortMidiStream* stream;
 } Midi_mode_portmidi;
+// Not sure whether it's OK to call Pm_Terminate() without having a successful
+// call to Pm_Initialize() -- let's just treat it with tweezers.
+static bool portmidi_is_initialized = false;
 #endif
 
 typedef union {
@@ -707,8 +772,19 @@ void midi_mode_init_osc_bidule(Midi_mode* mm, char const* path) {
   mm->osc_bidule.path = path;
 }
 #ifdef FEAT_PORTMIDI
-PmError midi_mode_init_portmidi(Midi_mode* mm, PmDeviceID dev_id) {
+PmError portmidi_init_if_necessary(void) {
+  if (portmidi_is_initialized)
+    return 0;
+  // U64 t0 = stm_now();
   PmError e = Pm_Initialize();
+  // fprintf(stderr, "ms: %f\n", stm_sec(stm_since(t0)) * 1000);
+  if (e)
+    return e;
+  portmidi_is_initialized = true;
+  return 0;
+}
+PmError midi_mode_init_portmidi(Midi_mode* mm, PmDeviceID dev_id) {
+  PmError e = portmidi_init_if_necessary();
   if (e)
     return e;
   e = Pm_OpenOutput(&mm->portmidi.stream, dev_id, NULL, 0, NULL, NULL, 0);
@@ -742,7 +818,6 @@ typedef struct {
   Oevent_list scratch_oevent_list;
   Susnote_list susnote_list;
   Ged_cursor ged_cursor;
-  Piano_bits piano_bits;
   Usz tick_num;
   Usz ruler_spacing_y, ruler_spacing_x;
   Ged_input_mode input_mode;
@@ -753,14 +828,13 @@ typedef struct {
   char const* filename;
   Oosc_dev* oosc_dev;
   Midi_mode const* midi_mode;
-  Usz drag_start_y;
-  Usz drag_start_x;
-  float meter_level;
-  int win_h;
-  int win_w;
+  Usz activity_counter;
+  Usz random_seed;
+  Usz drag_start_y, drag_start_x;
+  int win_h, win_w;
+  int softmargin_y, softmargin_x;
   int grid_h;
-  int grid_scroll_y; // not sure if i like this being int
-  int grid_scroll_x;
+  int grid_scroll_y, grid_scroll_x; // not sure if i like this being int
   bool needs_remarking : 1;
   bool is_draw_dirty : 1;
   bool is_playing : 1;
@@ -770,20 +844,18 @@ typedef struct {
   bool is_hud_visible : 1;
 } Ged;
 
-void ged_init(Ged* a, Usz undo_limit, Usz init_bpm) {
+void ged_init(Ged* a, Usz undo_limit, Usz init_bpm, Usz init_seed) {
   field_init(&a->field);
   field_init(&a->scratch_field);
   field_init(&a->clipboard_field);
   mbuf_reusable_init(&a->mbuf_r);
   undo_history_init(&a->undo_hist, undo_limit);
-  ged_cursor_init(&a->ged_cursor);
   oevent_list_init(&a->oevent_list);
   oevent_list_init(&a->scratch_oevent_list);
   susnote_list_init(&a->susnote_list);
-  a->piano_bits = ORCA_PIANO_BITS_NONE;
+  ged_cursor_init(&a->ged_cursor);
   a->tick_num = 0;
-  a->ruler_spacing_y = 8;
-  a->ruler_spacing_x = 8;
+  a->ruler_spacing_y = a->ruler_spacing_x = 8;
   a->input_mode = Ged_input_mode_normal;
   a->bpm = init_bpm;
   a->clock = 0;
@@ -792,17 +864,16 @@ void ged_init(Ged* a, Usz undo_limit, Usz init_bpm) {
   a->filename = NULL;
   a->oosc_dev = NULL;
   a->midi_mode = NULL;
-  a->meter_level = 0.0f;
-  a->win_h = 0;
-  a->win_w = 0;
+  a->activity_counter = 0;
+  a->random_seed = init_seed;
+  a->drag_start_y = a->drag_start_x = 0;
+  a->win_h = a->win_w = 0;
+  a->softmargin_y = a->softmargin_x = 0;
   a->grid_h = 0;
-  a->grid_scroll_y = 0;
-  a->grid_scroll_x = 0;
-  a->drag_start_y = 0;
-  a->drag_start_x = 0;
+  a->grid_scroll_y = a->grid_scroll_x = 0;
   a->needs_remarking = true;
   a->is_draw_dirty = false;
-  a->is_playing = false;
+  a->is_playing = true;
   a->draw_event_list = false;
   a->is_mouse_down = false;
   a->is_mouse_dragging = false;
@@ -1020,7 +1091,7 @@ void send_output_events(Oosc_dev* oosc_dev, Midi_mode const* midi_mode, Usz bpm,
                                     Pm_Message(istatus, inote, ivel));
         // todo bad
         if (pme) {
-          fprintf(stderr, "PortMIDI error: %s\n", Pm_GetErrorText(pme));
+          fprintf(stderr, "PortMidi error: %s\n", Pm_GetErrorText(pme));
         }
       } break;
 #endif
@@ -1046,24 +1117,22 @@ double ged_secs_to_deadline(Ged const* a) {
   }
 }
 
-ORCA_FORCE_INLINE
-static float float_clamp(float a, float low, float high) {
-  if (a < low)
-    return low;
-  if (a > high)
-    return high;
-  return a;
-}
-
 void ged_reset_clock(Ged* a) { a->clock = stm_now(); }
+
+void clear_and_run_vm(Glyph* restrict gbuf, Mark* restrict mbuf, Usz height,
+                      Usz width, Usz tick_number, Oevent_list* oevent_list,
+                      Usz random_seed) {
+  mbuffer_clear(mbuf, height, width);
+  oevent_list_clear(oevent_list);
+  orca_run(gbuf, mbuf, height, width, tick_number, oevent_list, random_seed);
+}
 
 void ged_do_stuff(Ged* a) {
   double secs_span = 60.0 / (double)a->bpm / 4.0;
   Oosc_dev* oosc_dev = a->oosc_dev;
   Midi_mode const* midi_mode = a->midi_mode;
   double secs = stm_sec(stm_since(a->clock));
-  a->meter_level -= (float)secs;
-  a->meter_level = float_clamp(a->meter_level, 0.0f, 1.0f);
+  (void)secs; // unused, was previously used for activity meter decay
   if (!a->is_playing)
     return;
   bool do_play = false;
@@ -1104,10 +1173,10 @@ void ged_do_stuff(Ged* a) {
   if (do_play) {
     apply_time_to_sustained_notes(oosc_dev, midi_mode, secs_span,
                                   &a->susnote_list, &a->time_to_next_note_off);
-    orca_run(a->field.buffer, a->mbuf_r.buffer, a->field.height, a->field.width,
-             a->tick_num, &a->oevent_list, a->piano_bits);
+    clear_and_run_vm(a->field.buffer, a->mbuf_r.buffer, a->field.height,
+                     a->field.width, a->tick_num, &a->oevent_list,
+                     a->random_seed);
     ++a->tick_num;
-    a->piano_bits = ORCA_PIANO_BITS_NONE;
     a->needs_remarking = true;
     a->is_draw_dirty = true;
 
@@ -1115,9 +1184,8 @@ void ged_do_stuff(Ged* a) {
     if (count > 0) {
       send_output_events(oosc_dev, midi_mode, a->bpm, &a->susnote_list,
                          a->oevent_list.buffer, count);
+      a->activity_counter += count;
     }
-    a->meter_level += (float)count * 0.2f;
-    a->meter_level = float_clamp(a->meter_level, 0.0f, 1.0f);
     // note for future: sustained note deadlines may have changed due to note
     // on. will need to update stored deadline in memory if
     // ged_apply_delta_secs isn't called again immediately after ged_do_stuff.
@@ -1168,15 +1236,71 @@ void ged_make_cursor_visible(Ged* a) {
 
 enum { Hud_height = 2 };
 
-void ged_set_window_size(Ged* a, int win_h, int win_w) {
-  bool draw_hud = win_h > Hud_height + 1;
-  int grid_h = draw_hud ? win_h - 2 : win_h;
-  a->win_h = win_h;
-  a->win_w = win_w;
+void ged_update_internal_geometry(Ged* a) {
+  int win_h = a->win_h;
+  int softmargin_y = a->softmargin_y;
+  bool show_hud = win_h > Hud_height + 1;
+  int grid_h = show_hud ? win_h - Hud_height : win_h;
+  if (grid_h > a->field.height) {
+    int halfy = (grid_h - a->field.height + 1) / 2;
+    grid_h -= halfy < softmargin_y ? halfy : softmargin_y;
+  }
   a->grid_h = grid_h;
   a->is_draw_dirty = true;
-  a->is_hud_visible = draw_hud;
+  a->is_hud_visible = show_hud;
+}
+
+void ged_set_window_size(Ged* a, int win_h, int win_w, int softmargin_y,
+                         int softmargin_x) {
+  if (a->win_h == win_h && a->win_w == win_w &&
+      a->softmargin_y == softmargin_y && a->softmargin_x == softmargin_x)
+    return;
+  a->win_h = win_h;
+  a->win_w = win_w;
+  a->softmargin_y = softmargin_y;
+  a->softmargin_x = softmargin_x;
+  ged_update_internal_geometry(a);
   ged_make_cursor_visible(a);
+}
+
+bool ged_suggest_nice_grid_size(int win_h, int win_w, int softmargin_y,
+                                int softmargin_x, int ruler_spacing_y,
+                                int ruler_spacing_x, Usz* out_grid_h,
+                                Usz* out_grid_w) {
+  if (win_h < 1 || win_w < 1 || softmargin_y < 0 || softmargin_x < 0 ||
+      ruler_spacing_y < 1 || ruler_spacing_x < 1)
+    return false;
+  // TODO overflow checks
+  int h = (win_h - softmargin_y - Hud_height - 1) / ruler_spacing_y;
+  h *= ruler_spacing_y;
+  int w = (win_w - softmargin_x * 2 - 1) / ruler_spacing_x;
+  w *= ruler_spacing_x;
+  if (h < ruler_spacing_y)
+    h = ruler_spacing_y;
+  if (w < ruler_spacing_x)
+    w = ruler_spacing_x;
+  h++;
+  w++;
+  if (h >= ORCA_Y_MAX || w >= ORCA_X_MAX)
+    return false;
+  *out_grid_h = (Usz)h;
+  *out_grid_w = (Usz)w;
+  return true;
+}
+bool ged_suggest_tight_grid_size(int win_h, int win_w, int softmargin_y,
+                                 int softmargin_x, Usz* out_grid_h,
+                                 Usz* out_grid_w) {
+
+  if (win_h < 1 || win_w < 1 || softmargin_y < 0 || softmargin_x < 0)
+    return false;
+  // TODO overflow checks
+  int h = win_h - softmargin_y - Hud_height;
+  int w = win_w - softmargin_x * 2;
+  if (h < 1 || w < 1 || h >= ORCA_Y_MAX || w >= ORCA_X_MAX)
+    return false;
+  *out_grid_h = (Usz)h;
+  *out_grid_w = (Usz)w;
+  return true;
 }
 
 void ged_draw(Ged* a, WINDOW* win) {
@@ -1197,12 +1321,11 @@ void ged_draw(Ged* a, WINDOW* win) {
                                   a->field.width);
     field_copy(&a->field, &a->scratch_field);
     mbuf_reusable_ensure_size(&a->mbuf_r, a->field.height, a->field.width);
-    orca_run(a->scratch_field.buffer, a->mbuf_r.buffer, a->field.height,
-             a->field.width, a->tick_num, &a->scratch_oevent_list,
-             a->piano_bits);
+    clear_and_run_vm(a->scratch_field.buffer, a->mbuf_r.buffer, a->field.height,
+                     a->field.width, a->tick_num, &a->scratch_oevent_list,
+                     a->random_seed);
     a->needs_remarking = false;
   }
-  int win_h = a->win_h;
   int win_w = a->win_w;
   draw_glyphs_grid_scrolled(win, 0, 0, a->grid_h, win_w, a->field.buffer,
                             a->mbuf_r.buffer, a->field.height, a->field.width,
@@ -1214,11 +1337,14 @@ void ged_draw(Ged* a, WINDOW* win) {
                    a->ged_cursor.h, a->ged_cursor.w, a->input_mode,
                    a->is_playing);
   if (a->is_hud_visible) {
-    char const* filename = a->filename ? a->filename : "";
-    draw_hud(win, win_h - Hud_height, 0, Hud_height, win_w, filename,
+    char const* filename = a->filename ? a->filename : "unnamed";
+    // char const* filename =
+    //     a->filename && strlen(a->filename) > 0 ? a->filename : "unnamed";
+    int hud_x = win_w > 50 + a->softmargin_x * 2 ? a->softmargin_x : 0;
+    draw_hud(win, a->grid_h, hud_x, Hud_height, win_w, filename,
              a->field.height, a->field.width, a->ruler_spacing_y,
              a->ruler_spacing_x, a->tick_num, a->bpm, &a->ged_cursor,
-             a->input_mode, a->meter_level);
+             a->input_mode, a->activity_counter);
   }
   if (a->draw_event_list) {
     draw_oevent_list(win, &a->oevent_list);
@@ -1271,6 +1397,76 @@ void ged_modify_selection_size(Ged* a, int delta_y, int delta_x) {
   }
 }
 
+bool ged_try_selection_clipped_to_field(Ged const* a, Usz* out_y, Usz* out_x,
+                                        Usz* out_h, Usz* out_w) {
+  Usz curs_y = a->ged_cursor.y;
+  Usz curs_x = a->ged_cursor.x;
+  Usz curs_h = a->ged_cursor.h;
+  Usz curs_w = a->ged_cursor.w;
+  Usz field_h = a->field.height;
+  Usz field_w = a->field.width;
+  if (curs_y >= field_h || curs_x >= field_w)
+    return false;
+  if (field_h - curs_y < curs_h)
+    curs_h = field_h - curs_y;
+  if (field_w - curs_x < curs_w)
+    curs_w = field_w - curs_x;
+  *out_y = curs_y;
+  *out_x = curs_x;
+  *out_h = curs_h;
+  *out_w = curs_w;
+  return true;
+}
+
+bool ged_slide_selection(Ged* a, int delta_y, int delta_x) {
+  Usz curs_y_0, curs_x_0, curs_h_0, curs_w_0;
+  Usz curs_y_1, curs_x_1, curs_h_1, curs_w_1;
+  if (!ged_try_selection_clipped_to_field(a, &curs_y_0, &curs_x_0, &curs_h_0,
+                                          &curs_w_0))
+    return false;
+  ged_move_cursor_relative(a, delta_y, delta_x);
+  if (!ged_try_selection_clipped_to_field(a, &curs_y_1, &curs_x_1, &curs_h_1,
+                                          &curs_w_1))
+    return false;
+  // Don't create a history entry if nothing is going to happen.
+  if (curs_y_0 == curs_y_1 && curs_x_0 == curs_x_1 && curs_h_0 == curs_h_1 &&
+      curs_w_0 == curs_w_1)
+    return false;
+  undo_history_push(&a->undo_hist, &a->field, a->tick_num);
+  Usz field_h = a->field.height;
+  Usz field_w = a->field.width;
+  gbuffer_copy_subrect(a->field.buffer, a->field.buffer, field_h, field_w,
+                       field_h, field_w, curs_y_0, curs_x_0, curs_y_1, curs_x_1,
+                       curs_h_0, curs_w_0);
+  // Erase/clear the area that was within the selection rectangle in the
+  // starting position, but wasn't written to during the copy. (In other words,
+  // this is the area that was 'left behind' when we moved the selection
+  // rectangle, plus any area that was along the bottom and right edge of the
+  // field that didn't have anything to copy to it when the selection rectangle
+  // extended outside of the field.)
+  Usz ey, eh, ex, ew;
+  if (curs_y_1 > curs_y_0) {
+    ey = curs_y_0;
+    eh = curs_y_1 - curs_y_0;
+  } else {
+    ey = curs_y_1 + curs_h_0;
+    eh = (curs_y_0 + curs_h_0) - ey;
+  }
+  if (curs_x_1 > curs_x_0) {
+    ex = curs_x_0;
+    ew = curs_x_1 - curs_x_0;
+  } else {
+    ex = curs_x_1 + curs_w_0;
+    ew = (curs_x_0 + curs_w_0) - ex;
+  }
+  gbuffer_fill_subrect(a->field.buffer, field_h, field_w, ey, curs_x_0, eh,
+                       curs_w_0, '.');
+  gbuffer_fill_subrect(a->field.buffer, field_h, field_w, curs_y_0, ex,
+                       curs_h_0, ew, '.');
+  a->needs_remarking = true;
+  return true;
+}
+
 typedef enum {
   Ged_dir_up,
   Ged_dir_down,
@@ -1278,41 +1474,57 @@ typedef enum {
   Ged_dir_right,
 } Ged_dir;
 
-void ged_dir_input(Ged* a, Ged_dir dir) {
+void ged_dir_input(Ged* a, Ged_dir dir, int step_length) {
   switch (a->input_mode) {
   case Ged_input_mode_normal:
   case Ged_input_mode_append:
-  case Ged_input_mode_piano:
     switch (dir) {
     case Ged_dir_up:
-      ged_move_cursor_relative(a, -1, 0);
+      ged_move_cursor_relative(a, -step_length, 0);
       break;
     case Ged_dir_down:
-      ged_move_cursor_relative(a, 1, 0);
+      ged_move_cursor_relative(a, step_length, 0);
       break;
     case Ged_dir_left:
-      ged_move_cursor_relative(a, 0, -1);
+      ged_move_cursor_relative(a, 0, -step_length);
       break;
     case Ged_dir_right:
-      ged_move_cursor_relative(a, 0, 1);
+      ged_move_cursor_relative(a, 0, step_length);
       break;
     }
     break;
   case Ged_input_mode_selresize:
     switch (dir) {
     case Ged_dir_up:
-      ged_modify_selection_size(a, -1, 0);
+      ged_modify_selection_size(a, -step_length, 0);
       break;
     case Ged_dir_down:
-      ged_modify_selection_size(a, 1, 0);
+      ged_modify_selection_size(a, step_length, 0);
       break;
     case Ged_dir_left:
-      ged_modify_selection_size(a, 0, -1);
+      ged_modify_selection_size(a, 0, -step_length);
       break;
     case Ged_dir_right:
-      ged_modify_selection_size(a, 0, 1);
+      ged_modify_selection_size(a, 0, step_length);
       break;
     }
+    break;
+  case Ged_input_mode_slide:
+    switch (dir) {
+    case Ged_dir_up:
+      ged_slide_selection(a, -step_length, 0);
+      break;
+    case Ged_dir_down:
+      ged_slide_selection(a, step_length, 0);
+      break;
+    case Ged_dir_left:
+      ged_slide_selection(a, 0, -step_length);
+      break;
+    case Ged_dir_right:
+      ged_slide_selection(a, 0, step_length);
+      break;
+    }
+    break;
   }
 }
 
@@ -1426,6 +1638,7 @@ void ged_resize_grid_relative(Ged* a, Isz delta_y, Isz delta_x) {
                              &a->scratch_field, &a->undo_hist, &a->ged_cursor);
   a->needs_remarking = true; // could check if we actually resized
   a->is_draw_dirty = true;
+  ged_update_internal_geometry(a);
   ged_make_cursor_visible(a);
 }
 
@@ -1443,32 +1656,6 @@ void ged_write_character(Ged* a, char c) {
                              1);
   }
   a->is_draw_dirty = true;
-}
-
-void ged_add_piano_bits_for_character(Ged* a, char c) {
-  Piano_bits added_bits = piano_bits_of((Glyph)c);
-  a->piano_bits |= added_bits;
-}
-
-bool ged_try_selection_clipped_to_field(Ged const* a, Usz* out_y, Usz* out_x,
-                                        Usz* out_h, Usz* out_w) {
-  Usz curs_y = a->ged_cursor.y;
-  Usz curs_x = a->ged_cursor.x;
-  Usz curs_h = a->ged_cursor.h;
-  Usz curs_w = a->ged_cursor.w;
-  Usz field_h = a->field.height;
-  Usz field_w = a->field.width;
-  if (curs_y >= field_h || curs_x >= field_w)
-    return false;
-  if (field_h - curs_y < curs_h)
-    curs_h = field_h - curs_y;
-  if (field_w - curs_x < curs_w)
-    curs_w = field_w - curs_x;
-  *out_y = curs_y;
-  *out_x = curs_x;
-  *out_h = curs_h;
-  *out_w = curs_w;
-  return true;
 }
 
 bool ged_fill_selection_with_char(Ged* a, Glyph c) {
@@ -1502,6 +1689,7 @@ void ged_input_character(Ged* a, char c) {
     break;
   case Ged_input_mode_normal:
   case Ged_input_mode_selresize:
+  case Ged_input_mode_slide:
     if (a->ged_cursor.h <= 1 && a->ged_cursor.w <= 1) {
       ged_write_character(a, c);
     } else {
@@ -1511,17 +1699,14 @@ void ged_input_character(Ged* a, char c) {
       a->is_draw_dirty = true;
     }
     break;
-  case Ged_input_mode_piano:
-    ged_add_piano_bits_for_character(a, c);
-    break;
   }
 }
 
 typedef enum {
   Ged_input_cmd_undo,
   Ged_input_cmd_toggle_append_mode,
-  Ged_input_cmd_toggle_piano_mode,
   Ged_input_cmd_toggle_selresize_mode,
+  Ged_input_cmd_toggle_slide_mode,
   Ged_input_cmd_step_forward,
   Ged_input_cmd_toggle_show_event_list,
   Ged_input_cmd_toggle_play_pause,
@@ -1541,6 +1726,7 @@ void ged_input_cmd(Ged* a, Ged_input_cmd ev) {
         undo_history_pop(&a->undo_hist, &a->field, &a->tick_num);
       }
       ged_cursor_confine(&a->ged_cursor, a->field.height, a->field.width);
+      ged_update_internal_geometry(a);
       ged_make_cursor_visible(a);
       a->needs_remarking = true;
       a->is_draw_dirty = true;
@@ -1554,14 +1740,6 @@ void ged_input_cmd(Ged* a, Ged_input_cmd ev) {
     }
     a->is_draw_dirty = true;
     break;
-  case Ged_input_cmd_toggle_piano_mode:
-    if (a->input_mode == Ged_input_mode_piano) {
-      a->input_mode = Ged_input_mode_normal;
-    } else {
-      a->input_mode = Ged_input_mode_piano;
-    }
-    a->is_draw_dirty = true;
-    break;
   case Ged_input_cmd_toggle_selresize_mode:
     if (a->input_mode == Ged_input_mode_selresize) {
       a->input_mode = Ged_input_mode_normal;
@@ -1570,12 +1748,21 @@ void ged_input_cmd(Ged* a, Ged_input_cmd ev) {
     }
     a->is_draw_dirty = true;
     break;
+  case Ged_input_cmd_toggle_slide_mode:
+    if (a->input_mode == Ged_input_mode_slide) {
+      a->input_mode = Ged_input_mode_normal;
+    } else {
+      a->input_mode = Ged_input_mode_slide;
+    }
+    a->is_draw_dirty = true;
+    break;
   case Ged_input_cmd_step_forward:
     undo_history_push(&a->undo_hist, &a->field, a->tick_num);
-    orca_run(a->field.buffer, a->mbuf_r.buffer, a->field.height, a->field.width,
-             a->tick_num, &a->oevent_list, a->piano_bits);
+    clear_and_run_vm(a->field.buffer, a->mbuf_r.buffer, a->field.height,
+                     a->field.width, a->tick_num, &a->oevent_list,
+                     a->random_seed);
     ++a->tick_num;
-    a->piano_bits = ORCA_PIANO_BITS_NONE;
+    a->activity_counter += a->oevent_list.count;
     a->needs_remarking = true;
     a->is_draw_dirty = true;
     break;
@@ -1583,7 +1770,6 @@ void ged_input_cmd(Ged* a, Ged_input_cmd ev) {
     if (a->is_playing) {
       ged_stop_all_sustained_notes(a);
       a->is_playing = false;
-      a->meter_level = 0.0f;
       send_control_message(a->oosc_dev, "/orca/stopped");
     } else {
       undo_history_push(&a->undo_hist, &a->field, a->tick_num);
@@ -1632,6 +1818,8 @@ void ged_input_cmd(Ged* a, Ged_input_cmd ev) {
     gbuffer_copy_subrect(cb_field->buffer, a->field.buffer, cbfield_h,
                          cbfield_w, field_h, field_w, 0, 0, curs_y, curs_x,
                          cpy_h, cpy_w);
+    a->ged_cursor.h = cpy_h;
+    a->ged_cursor.w = cpy_w;
     a->needs_remarking = true;
     a->is_draw_dirty = true;
   } break;
@@ -1642,11 +1830,6 @@ void ged_input_cmd(Ged* a, Ged_input_cmd ev) {
     } else if (a->ged_cursor.h != 1 || a->ged_cursor.w != 1) {
       a->ged_cursor.h = 1;
       a->ged_cursor.w = 1;
-      a->is_draw_dirty = true;
-    } else if (a->clipboard_field.height >= 1 &&
-               a->clipboard_field.width >= 1) {
-      a->ged_cursor.h = a->clipboard_field.height;
-      a->ged_cursor.w = a->clipboard_field.width;
       a->is_draw_dirty = true;
     }
   } break;
@@ -1672,31 +1855,97 @@ bool hacky_try_save(Field* field, char const* filename) {
 
 enum {
   Main_menu_id = 1,
+  Open_form_id,
   Save_as_form_id,
+  Set_tempo_form_id,
+  Set_grid_dims_form_id,
+  Autofit_menu_id,
+  Confirm_new_file_menu_id,
+#ifdef FEAT_PORTMIDI
+  Portmidi_output_device_menu_id,
+#endif
 };
-
+enum {
+  Open_name_text_line_id = 1,
+};
 enum {
   Save_as_name_id = 1,
 };
-
+enum {
+  Tempo_text_line_id = 1,
+};
+enum {
+  Dims_text_line_id = 1,
+};
+enum {
+  Autofit_nicely_id = 1,
+  Autofit_tightly_id,
+};
+enum {
+  Confirm_new_file_reject_id = 1,
+  Confirm_new_file_accep_id,
+};
 enum {
   Main_menu_quit = 1,
   Main_menu_controls,
+  Main_menu_opers_guide,
+  Main_menu_new,
+  Main_menu_open,
   Main_menu_save,
   Main_menu_save_as,
+  Main_menu_set_tempo,
+  Main_menu_set_grid_dims,
+  Main_menu_autofit_grid,
   Main_menu_about,
+#ifdef FEAT_PORTMIDI
+  Main_menu_choose_portmidi_output,
+#endif
 };
 
 void push_main_menu(void) {
   Qmenu* qm = qmenu_create(Main_menu_id);
   qmenu_set_title(qm, "ORCA");
-  qmenu_add_choice(qm, "Save", Main_menu_save);
-  qmenu_add_choice(qm, "Save As...", Main_menu_save_as);
+  qmenu_add_choice(qm, Main_menu_new, "New");
+  qmenu_add_choice(qm, Main_menu_open, "Open...");
+  qmenu_add_choice(qm, Main_menu_save, "Save");
+  qmenu_add_choice(qm, Main_menu_save_as, "Save As...");
   qmenu_add_spacer(qm);
-  qmenu_add_choice(qm, "Controls...", Main_menu_controls);
-  qmenu_add_choice(qm, "About...", Main_menu_about);
+  qmenu_add_choice(qm, Main_menu_set_tempo, "Set BPM...");
+  qmenu_add_choice(qm, Main_menu_set_grid_dims, "Set Grid Size...");
+  qmenu_add_choice(qm, Main_menu_autofit_grid, "Auto-fit Grid");
   qmenu_add_spacer(qm);
-  qmenu_add_choice(qm, "Quit", Main_menu_quit);
+#ifdef FEAT_PORTMIDI
+  qmenu_add_choice(qm, Main_menu_choose_portmidi_output, "MIDI Output...");
+  qmenu_add_spacer(qm);
+#endif
+  qmenu_add_choice(qm, Main_menu_controls, "Controls...");
+  qmenu_add_choice(qm, Main_menu_opers_guide, "Operators...");
+  qmenu_add_choice(qm, Main_menu_about, "About...");
+  qmenu_add_spacer(qm);
+  qmenu_add_choice(qm, Main_menu_quit, "Quit");
+  qmenu_push_to_nav(qm);
+}
+
+void pop_qnav_if_main_menu(void) {
+  Qblock* qb = qnav_top_block();
+  if (qb && qb->tag == Qblock_type_qmenu &&
+      qmenu_id(qmenu_of(qb)) == Main_menu_id)
+    qnav_stack_pop();
+}
+
+void push_confirm_new_file_menu(void) {
+  Qmenu* qm = qmenu_create(Confirm_new_file_menu_id);
+  qmenu_set_title(qm, "Are you sure?");
+  qmenu_add_choice(qm, Confirm_new_file_reject_id, "Cancel");
+  qmenu_add_choice(qm, Confirm_new_file_accep_id, "Create New File");
+  qmenu_push_to_nav(qm);
+}
+
+void push_autofit_menu(void) {
+  Qmenu* qm = qmenu_create(Autofit_menu_id);
+  qmenu_set_title(qm, "Auto-fit Grid");
+  qmenu_add_choice(qm, Autofit_nicely_id, "Nicely");
+  qmenu_add_choice(qm, Autofit_tightly_id, "Tightly");
   qmenu_push_to_nav(qm);
 }
 
@@ -1704,8 +1953,8 @@ void push_about_msg(void) {
   // clang-format off
   static char const* logo[] = {
   "lqqqk|lqqqk|lqqqk|lqqqk",
-  "x   x|xqqqu|x    |lqqqu",
-  "mqqqj|m   j|mqqqj|mqqqj",
+  "x   x|x   j|x    |lqqqu",
+  "mqqqj|m    |mqqqj|m   j",
   };
   static char const* footer =
   "Live Programming Environment";
@@ -1742,7 +1991,7 @@ void push_about_msg(void) {
   }
   wattrset(w, A_DIM);
   wmove(w, tpad + rows + sep, footer_left_pad);
-  wprintw(w, footer);
+  waddstr(w, footer);
 }
 
 void push_controls_msg(void) {
@@ -1763,10 +2012,12 @@ void push_controls_msg(void) {
       {"Ctrl+V", "Paste"},
       {"Ctrl+S", "Save"},
       {"Ctrl+F", "Frame Step Forward"},
-      {"Return", "Append/Overwrite Mode"},
-      {"/", "Key Trigger Mode"},
+      {"Ctrl+I or Insert", "Append/Overwrite Mode"},
+      // {"/", "Key Trigger Mode"},
       {"' (quote)", "Rectangle Selection Mode"},
       {"Shift+Arrow Keys", "Adjust Rectangle Selection"},
+      {"Alt+Arrow Keys", "Slide Selection"},
+      {"` (grave) or ~", "Slide Selection Mode"},
       {"Escape", "Return to Normal Mode or Deselect"},
       {"( and )", "Resize Grid (Horizontal)"},
       {"_ and +", "Resize Grid (Vertical)"},
@@ -1793,34 +2044,107 @@ void push_controls_msg(void) {
     }
   }
   int mid_pad = 2;
-  int total_width = 1 + w_input + mid_pad + w_desc;
+  int total_width = 1 + w_input + mid_pad + w_desc + 1;
   Qmsg* qm = qmsg_push(ORCA_ARRAY_COUNTOF(items), total_width);
   qmsg_set_title(qm, "Controls");
   WINDOW* w = qmsg_window(qm);
   for (int i = 0; i < (int)ORCA_ARRAY_COUNTOF(items); ++i) {
     if (items[i].input) {
       wmove(w, i, 1 + w_input - (int)strlen(items[i].input));
-      wprintw(w, items[i].input);
+      waddstr(w, items[i].input);
     }
     if (items[i].desc) {
       wmove(w, i, 1 + w_input + mid_pad);
-      wprintw(w, items[i].desc);
+      waddstr(w, items[i].desc);
     }
   }
 }
 
-void try_save_with_msg(Ged* ged) {
-  if (!ged->filename)
-    return;
-  bool ok = hacky_try_save(&ged->field, ged->filename);
-  Qmsg* msg = qmsg_push(3, 50);
-  WINDOW* msgw = qmsg_window(msg);
-  wmove(msgw, 0, 1);
-  if (ok) {
-    wprintw(msgw, "Saved to: %s", ged->filename);
-  } else {
-    wprintw(msgw, "FAILED to save to %s", ged->filename);
+void push_opers_guide_msg(void) {
+  struct Guide_item {
+    char glyph;
+    char const* name;
+    char const* desc;
+  };
+  static struct Guide_item items[] = {
+      {'A', "add", "Outputs sum of inputs."},
+      {'B', "between", "Outputs subtraction of inputs."},
+      {'C', "clock", "Outputs modulo of frame."},
+      {'D', "delay", "Bangs on modulo of frame."},
+      {'E', "east", "Moves eastward, or bangs."},
+      {'F', "if", "Bangs if inputs are equal."},
+      {'G', "generator", "Writes operands with offset."},
+      {'H', "halt", "Halts southward operand."},
+      {'I', "increment", "Increments southward operand."},
+      {'J', "jumper", "Outputs northward operand."},
+      {'K', "konkat", "Reads multiple variables."},
+      {'L', "lesser", "Outputs smallest input."},
+      {'M', "multiply", "Outputs product of inputs."},
+      {'N', "north", "Moves Northward, or bangs."},
+      {'O', "read", "Reads operand with offset."},
+      {'P', "push", "Writes eastward operand."},
+      {'Q', "query", "Reads operands with offset."},
+      {'R', "random", "Outputs random value."},
+      {'S', "south", "Moves southward, or bangs."},
+      {'T', "track", "Reads eastward operand."},
+      {'U', "uclid", "Bangs on Euclidean rhythm."},
+      {'V', "variable", "Reads and writes variable."},
+      {'W', "west", "Moves westward, or bangs."},
+      {'X', "write", "Writes operand with offset."},
+      {'Y', "jymper", "Outputs westward operand."},
+      {'Z', "lerp", "Transitions operand to target."},
+      {'*', "bang", "Bangs neighboring operands."},
+      {'#', "comment", "Halts line."},
+      // {'*', "self", "Sends ORCA command."},
+      {':', "midi", "Sends MIDI note."},
+      // {'!', "cc", "Sends MIDI control change."},
+      // {'?', "pb", "Sends MIDI pitch bend."},
+      // {'%', "mono", "Sends MIDI monophonic note."},
+      {'=', "osc", "Sends OSC message."},
+      {';', "udp", "Sends UDP message."},
+  };
+  int w_desc = 0;
+  for (Usz i = 0; i < ORCA_ARRAY_COUNTOF(items); ++i) {
+    if (items[i].desc) {
+      int wr = (int)strlen(items[i].desc);
+      if (wr > w_desc)
+        w_desc = wr;
+    }
   }
+  int left_pad = 1;
+  int mid_pad = 1;
+  int right_pad = 1;
+  int total_width = left_pad + 1 + mid_pad + w_desc + right_pad;
+  Qmsg* qm = qmsg_push(ORCA_ARRAY_COUNTOF(items), total_width);
+  qmsg_set_title(qm, "Operators");
+  WINDOW* w = qmsg_window(qm);
+  for (int i = 0; i < (int)ORCA_ARRAY_COUNTOF(items); ++i) {
+    wmove(w, i, left_pad);
+    waddch(w, (chtype)items[i].glyph | A_bold);
+    wmove(w, i, left_pad + 1 + mid_pad);
+    wattrset(w, A_normal);
+    waddstr(w, items[i].desc);
+  }
+}
+
+void push_open_form(char const* initial) {
+  Qform* qf = qform_create(Open_form_id);
+  qform_set_title(qf, "Open");
+  qform_add_text_line(qf, Open_name_text_line_id, initial);
+  qform_push_to_nav(qf);
+}
+
+bool try_save_with_msg(Field* field, sdd const* str) {
+  if (!sdd_len(str))
+    return false;
+  bool ok = hacky_try_save(field, sddc(str));
+  if (ok) {
+    qmsg_printf_push(NULL, "Saved to:\n%s", sddc(str));
+  } else {
+    qmsg_printf_push("Error Saving File", "Unable to save file to:\n%s",
+                     sddc(str));
+  }
+  return ok;
 }
 
 void push_save_as_form(char const* initial) {
@@ -1830,12 +2154,199 @@ void push_save_as_form(char const* initial) {
   qform_push_to_nav(qf);
 }
 
+void push_set_tempo_form(Usz initial) {
+  Qform* qf = qform_create(Set_tempo_form_id);
+  char buff[64];
+  int snres = snprintf(buff, sizeof buff, "%zu", initial);
+  char const* inistr = snres > 0 && (Usz)snres < sizeof buff ? buff : "120";
+  qform_set_title(qf, "Set BPM");
+  qform_add_text_line(qf, Tempo_text_line_id, inistr);
+  qform_push_to_nav(qf);
+}
+
+void push_set_grid_dims_form(Usz init_height, Usz init_width) {
+  Qform* qf = qform_create(Set_grid_dims_form_id);
+  char buff[128];
+  int snres = snprintf(buff, sizeof buff, "%zux%zu", init_width, init_height);
+  char const* inistr = snres > 0 && (Usz)snres < sizeof buff ? buff : "57x25";
+  qform_set_title(qf, "Set Grid Size");
+  qform_add_text_line(qf, Dims_text_line_id, inistr);
+  qform_push_to_nav(qf);
+}
+
+#ifdef FEAT_PORTMIDI
+void push_portmidi_output_device_menu(Midi_mode const* midi_mode) {
+  Qmenu* qm = qmenu_create(Portmidi_output_device_menu_id);
+  qmenu_set_title(qm, "PortMidi Device Selection");
+  PmError e = portmidi_init_if_necessary();
+  if (e) {
+    qmenu_destroy(qm);
+    qmsg_printf_push("PortMidi Error",
+                     "PortMidi error during initialization:\n%s",
+                     Pm_GetErrorText(e));
+    return;
+  }
+  int num = Pm_CountDevices();
+  int output_devices = 0;
+  int cur_dev_id = 0;
+  bool has_cur_dev_id = false;
+  if (midi_mode->any.type == Midi_mode_type_portmidi) {
+    cur_dev_id = midi_mode->portmidi.device_id;
+    has_cur_dev_id = true;
+  }
+  for (int i = 0; i < num; ++i) {
+    PmDeviceInfo const* info = Pm_GetDeviceInfo(i);
+    if (!info || !info->output)
+      continue;
+    bool is_cur_dev_id = has_cur_dev_id && cur_dev_id == i;
+    qmenu_add_printf(qm, i, "[%c] #%d - %s", is_cur_dev_id ? '*' : ' ', i,
+                     info->name);
+    ++output_devices;
+  }
+  if (output_devices == 0) {
+    qmenu_destroy(qm);
+    qmsg_printf_push("No PortMidi Devices",
+                     "No PortMidi output devices found.");
+    return;
+  }
+  if (has_cur_dev_id) {
+    qmenu_set_current_item(qm, cur_dev_id);
+  }
+  qmenu_push_to_nav(qm);
+}
+#endif
+
+//
+// Misc utils
+//
+
+bool read_int(char const* str, int* out) {
+  int a;
+  int res = sscanf(str, "%d", &a);
+  if (res != 1)
+    return false;
+  *out = a;
+  return true;
+}
+
+// Reads something like '5x3' or '5'. Writes the same value to both outputs if
+// only one is specified. Returns false on error.
+bool read_nxn_or_n(char const* str, int* out_a, int* out_b) {
+  int a, b;
+  int res = sscanf(str, "%dx%d", &a, &b);
+  if (res == EOF)
+    return false;
+  if (res == 1) {
+    *out_a = a;
+    *out_b = a;
+    return true;
+  }
+  if (res == 2) {
+    *out_a = a;
+    *out_b = b;
+    return true;
+  }
+  return false;
+}
+
+typedef enum {
+  Bracketed_paste_sequence_none = 0,
+  Bracketed_paste_sequence_begin,
+  Bracketed_paste_sequence_end,
+} Bracketed_paste_sequence;
+
+Bracketed_paste_sequence bracketed_paste_sequence_getch_ungetch(WINDOW* win) {
+  int esc1 = wgetch(win);
+  if (esc1 == '[') {
+    int esc2 = wgetch(win);
+    if (esc2 == '2') {
+      int esc3 = wgetch(win);
+      if (esc3 == '0') {
+        int esc4 = wgetch(win);
+        // Start or end of bracketed paste
+        if (esc4 == '0' || esc4 == '1') {
+          int esc5 = wgetch(win);
+          if (esc5 == '~') {
+            switch (esc4) {
+            case '0':
+              return Bracketed_paste_sequence_begin;
+            case '1':
+              return Bracketed_paste_sequence_end;
+            }
+          }
+          ungetch(esc5);
+        }
+        ungetch(esc4);
+      }
+      ungetch(esc3);
+    }
+    ungetch(esc2);
+  }
+  ungetch(esc1);
+  return Bracketed_paste_sequence_none;
+}
+
+void try_send_to_gui_clipboard(Ged const* a, bool* io_use_gui_clipboard) {
+  if (!*io_use_gui_clipboard)
+    return;
+#if 0 // If we want to use grid directly
+  Usz curs_y, curs_x, curs_h, curs_w;
+  if (!ged_try_selection_clipped_to_field(a, &curs_y, &curs_x, &curs_h,
+                                          &curs_w))
+    return;
+  Cboard_error cberr =
+      cboard_copy(a->clipboard_field.buffer, a->clipboard_field.height,
+                  a->clipboard_field.width, curs_y, curs_x, curs_h, curs_w);
+#endif
+  Usz cb_h = a->clipboard_field.height, cb_w = a->clipboard_field.width;
+  if (cb_h < 1 || cb_w < 1)
+    return;
+  Cboard_error cberr =
+      cboard_copy(a->clipboard_field.buffer, cb_h, cb_w, 0, 0, cb_h, cb_w);
+  if (cberr) {
+    *io_use_gui_clipboard = false;
+    switch (cberr) {
+    case Cboard_error_none:
+    case Cboard_error_unavailable:
+    case Cboard_error_popen_failed:
+    case Cboard_error_process_exit_error:
+      break;
+    }
+  }
+}
+
+char const* field_load_error_string(Field_load_error fle) {
+  char const* errstr = "Unknown";
+  switch (fle) {
+  case Field_load_error_ok:
+    errstr = "OK";
+    break;
+  case Field_load_error_cant_open_file:
+    errstr = "Unable to open file";
+    break;
+  case Field_load_error_too_many_columns:
+    errstr = "Grid file has too many columns";
+    break;
+  case Field_load_error_too_many_rows:
+    errstr = "Grid file has too many rows";
+    break;
+  case Field_load_error_no_rows_read:
+    errstr = "Grid file has no rows";
+    break;
+  case Field_load_error_not_a_rectangle:
+    errstr = "Grid file is not a rectangle";
+    break;
+  }
+  return errstr;
+}
+
 //
 // main
 //
 
 enum {
   Argopt_margins = UCHAR_MAX + 1,
+  Argopt_hardmargins,
   Argopt_undo_limit,
   Argopt_init_grid_size,
   Argopt_osc_server,
@@ -1843,6 +2354,7 @@ enum {
   Argopt_osc_midi_bidule,
   Argopt_strict_timing,
   Argopt_bpm,
+  Argopt_seed,
 #ifdef FEAT_PORTMIDI
   Argopt_portmidi_list_devices,
   Argopt_portmidi_output_device,
@@ -1852,6 +2364,7 @@ enum {
 int main(int argc, char** argv) {
   static struct option tui_options[] = {
       {"margins", required_argument, 0, Argopt_margins},
+      {"hard-margins", required_argument, 0, Argopt_hardmargins},
       {"undo-limit", required_argument, 0, Argopt_undo_limit},
       {"initial-size", required_argument, 0, Argopt_init_grid_size},
       {"help", no_argument, 0, 'h'},
@@ -1860,23 +2373,32 @@ int main(int argc, char** argv) {
       {"osc-midi-bidule", required_argument, 0, Argopt_osc_midi_bidule},
       {"strict-timing", no_argument, 0, Argopt_strict_timing},
       {"bpm", required_argument, 0, Argopt_bpm},
+      {"seed", required_argument, 0, Argopt_seed},
 #ifdef FEAT_PORTMIDI
       {"portmidi-list-devices", no_argument, 0, Argopt_portmidi_list_devices},
       {"portmidi-output-device", required_argument, 0,
        Argopt_portmidi_output_device},
 #endif
       {NULL, 0, NULL, 0}};
-  char* input_file = NULL;
-  int margin_thickness = 2;
+  sdd* file_name = NULL;
   int undo_history_limit = 100;
   char const* osc_hostname = NULL;
   char const* osc_port = NULL;
   bool strict_timing = false;
   int init_bpm = 120;
+  int init_seed = 1;
+  bool should_autosize_grid = true;
   int init_grid_dim_y = 25;
   int init_grid_dim_x = 57;
+  bool use_gui_cboard = true;
   Midi_mode midi_mode;
   midi_mode_init_null(&midi_mode);
+
+  int softmargin_y = 1;
+  int softmargin_x = 2;
+  int hardmargin_y = 0;
+  int hardmargin_x = 0;
+
   for (;;) {
     int c = getopt_long(argc, argv, "h", tui_options, NULL);
     if (c == -1)
@@ -1889,9 +2411,9 @@ int main(int argc, char** argv) {
       usage();
       exit(1);
     case Argopt_margins: {
-      margin_thickness = atoi(optarg);
-      if (margin_thickness < 0 ||
-          (margin_thickness == 0 && strcmp(optarg, "0"))) {
+      bool ok = read_nxn_or_n(optarg, &softmargin_x, &softmargin_y) &&
+                softmargin_x >= 0 && softmargin_y >= 0;
+      if (!ok) {
         fprintf(stderr,
                 "Bad margins argument %s.\n"
                 "Must be 0 or positive integer.\n",
@@ -1899,10 +2421,19 @@ int main(int argc, char** argv) {
         exit(1);
       }
     } break;
+    case Argopt_hardmargins: {
+      bool ok = read_nxn_or_n(optarg, &hardmargin_x, &hardmargin_y) &&
+                hardmargin_x >= 0 && hardmargin_y >= 0;
+      if (!ok) {
+        fprintf(stderr,
+                "Bad hard-margins argument %s.\n"
+                "Must be 0 or positive integer.\n",
+                optarg);
+        exit(1);
+      }
+    } break;
     case Argopt_undo_limit: {
-      undo_history_limit = atoi(optarg);
-      if (undo_history_limit < 0 ||
-          (undo_history_limit == 0 && strcmp(optarg, "0"))) {
+      if (!read_int(optarg, &undo_history_limit) || undo_history_limit < 0) {
         fprintf(stderr,
                 "Bad undo-limit argument %s.\n"
                 "Must be 0 or positive integer.\n",
@@ -1920,7 +2451,17 @@ int main(int argc, char** argv) {
         exit(1);
       }
     } break;
+    case Argopt_seed: {
+      if (!read_int(optarg, &init_seed) || init_seed < 0) {
+        fprintf(stderr,
+                "Bad seed argument %s.\n"
+                "Must be 0 or positive integer.\n",
+                optarg);
+        exit(1);
+      }
+    } break;
     case Argopt_init_grid_size: {
+      should_autosize_grid = false;
       enum {
         Max_dim_arg_val_y = ORCA_Y_MAX,
         Max_dim_arg_val_x = ORCA_X_MAX,
@@ -1968,14 +2509,14 @@ int main(int argc, char** argv) {
         ++output_devices;
       }
       if (output_devices == 0) {
-        printf("No PortMIDI output devices detected.\n");
+        printf("No PortMidi output devices detected.\n");
       }
       Pm_Terminate();
       exit(0);
     }
     case Argopt_portmidi_output_device: {
-      int dev_id = atoi(optarg);
-      if (dev_id < 0 || (dev_id == 0 && strcmp(optarg, "0"))) {
+      int dev_id;
+      if (!read_int(optarg, &dev_id) || dev_id < 0) {
         fprintf(stderr,
                 "Bad portmidi-output-device argument %s.\n"
                 "Must be 0 or positive integer.\n",
@@ -1985,7 +2526,7 @@ int main(int argc, char** argv) {
       midi_mode_deinit(&midi_mode);
       PmError pme = midi_mode_init_portmidi(&midi_mode, dev_id);
       if (pme) {
-        fprintf(stderr, "PortMIDI error: %s\n", Pm_GetErrorText(pme));
+        fprintf(stderr, "PortMidi error: %s\n", Pm_GetErrorText(pme));
         exit(1);
       }
       // todo a bunch of places where we don't terminate pm on exit. Guess we
@@ -1996,7 +2537,8 @@ int main(int argc, char** argv) {
   }
 
   if (optind == argc - 1) {
-    input_file = argv[optind];
+    should_autosize_grid = false;
+    file_name = sdd_new(argv[optind]);
   } else if (optind < argc - 1) {
     fprintf(stderr, "Expected only 1 file argument.\n");
     exit(1);
@@ -2004,7 +2546,7 @@ int main(int argc, char** argv) {
 
   qnav_init();
   Ged ged_state;
-  ged_init(&ged_state, (Usz)undo_history_limit, (Usz)init_bpm);
+  ged_init(&ged_state, (Usz)undo_history_limit, (Usz)init_bpm, (Usz)init_seed);
 
   if (osc_hostname != NULL && osc_port == NULL) {
     fprintf(stderr,
@@ -2030,43 +2572,33 @@ int main(int argc, char** argv) {
     }
   }
 
-  Heapstr file_name;
-
-  if (input_file) {
-    Field_load_error fle = field_load_file(input_file, &ged_state.field);
+  if (file_name) {
+    Field_load_error fle = field_load_file(sddc(file_name), &ged_state.field);
     if (fle != Field_load_error_ok) {
-      char const* errstr = "Unknown";
-      switch (fle) {
-      case Field_load_error_ok:
-        break;
-      case Field_load_error_cant_open_file:
-        errstr = "Unable to open file";
-        break;
-      case Field_load_error_too_many_columns:
-        errstr = "Grid file has too many columns";
-        break;
-      case Field_load_error_too_many_rows:
-        errstr = "Grid file has too many rows";
-        break;
-      case Field_load_error_no_rows_read:
-        errstr = "Grid file has no rows";
-        break;
-      case Field_load_error_not_a_rectangle:
-        errstr = "Grid file is not a rectangle";
-        break;
-      }
+      char const* errstr = field_load_error_string(fle);
       fprintf(stderr, "File load error: %s.\n", errstr);
       ged_deinit(&ged_state);
       qnav_deinit();
+      sdd_free(file_name);
       exit(1);
     }
-    heapstr_init_cstr(&file_name, input_file);
   } else {
-    heapstr_init_cstr(&file_name, "unnamed");
-    field_init_fill(&ged_state.field, (Usz)init_grid_dim_y,
-                    (Usz)init_grid_dim_x, '.');
+    file_name = sdd_newcap(0);
+    // Temp hacky stuff: we've crammed two code paths into the KEY_RESIZE event
+    // case. One of them is for the initial setup for an automatic grid size.
+    // The other is for actual resize events. We will factor this out into
+    // procedures in the future, but until then, we've made a slight mess. In
+    // the case where the user has explicitly specified a size, we'll allocate
+    // the Field stuff here. If there's an automatic size, then we'll allocate
+    // the field in the KEY_RESIZE handler. The reason we don't just allocate
+    // it here and then again later is to avoid an extra allocation and memory
+    // manipulation.
+    if (!should_autosize_grid) {
+      field_init_fill(&ged_state.field, (Usz)init_grid_dim_y,
+                      (Usz)init_grid_dim_x, '.');
+    }
   }
-  ged_state.filename = file_name.str;
+  ged_state.filename = sdd_len(file_name) ? sddc(file_name) : "unnamed";
   ged_set_midi_mode(&ged_state, &midi_mode);
 
   // Set up timer lib
@@ -2108,11 +2640,17 @@ int main(int argc, char** argv) {
     mouseinterval(0);
   }
 
+  printf("\033[?2004h\n"); // Ask terminal to use bracketed paste.
+
   WINDOW* cont_window = NULL;
 
   int key = KEY_RESIZE;
   wtimeout(stdscr, 0);
   int cur_timeout = 0;
+  Usz bracketed_paste_starting_x = 0, bracketed_paste_y = 0,
+      bracketed_paste_x = 0, bracketed_paste_max_y = 0,
+      bracketed_paste_max_x = 0;
+  bool is_in_bracketed_paste = false;
 
   // Send initial BPM
   send_num_message(ged_state.oosc_dev, "/orca/bpm", (I32)ged_state.bpm);
@@ -2130,13 +2668,40 @@ int main(int argc, char** argv) {
         wnoutrefresh(cont_window);
         drew_any = true;
       }
+      int term_h, term_w;
+      if (qnav_stack.count > 0) // todo lame, move this
+        getmaxyx(stdscr, term_h, term_w);
       for (Usz i = 0; i < qnav_stack.count; ++i) {
         Qblock* qb = qnav_stack.blocks[i];
         if (qnav_stack.stack_changed) {
-          qblock_print_frame(qb, i == qnav_stack.count - 1);
+          bool is_frontmost = i == qnav_stack.count - 1;
+          qblock_print_frame(qb, is_frontmost);
+          switch (qb->tag) {
+          case Qblock_type_qmsg:
+            break;
+          case Qblock_type_qmenu: {
+            Qmenu* qm = qmenu_of(qb);
+            qmenu_set_displayed_active(qm, is_frontmost);
+          } break;
+          case Qblock_type_qform:
+            break;
+          }
         }
-        touchwin(qb->outer_window);
-        wnoutrefresh(qb->outer_window);
+        touchwin(qb->outer_window); // here? or after continue?
+        if (term_h < 1 || term_w < 1)
+          continue;
+        int qbwin_h, qbwin_w;
+        getmaxyx(qb->outer_window, qbwin_h, qbwin_w);
+        int qbwin_endy = qb->y + qbwin_h;
+        int qbwin_endx = qb->x + qbwin_w;
+        if (qbwin_endy >= term_h)
+          qbwin_endy = term_h - 1;
+        if (qbwin_endx >= term_w)
+          qbwin_endx = term_w - 1;
+        if (qb->y >= qbwin_endy || qb->x >= qbwin_endx)
+          continue;
+        pnoutrefresh(qb->outer_window, 0, 0, qb->y, qb->x, qbwin_endy,
+                     qbwin_endx);
         drew_any = true;
       }
       qnav_stack.stack_changed = false;
@@ -2144,6 +2709,11 @@ int main(int argc, char** argv) {
         doupdate();
       double secs_to_d = ged_secs_to_deadline(&ged_state);
       int new_timeout;
+      // These values are tuned to work OK with the normal scheduling behavior
+      // on Linux, Mac, and Windows. Of course, there's no guarantee about how
+      // the scheduler will work so if you are using a modified kernel or
+      // something, this might be sub-optimal. But there's not really much we
+      // can do about it!
       if (strict_timing) {
         if (secs_to_d < ms_to_sec(0.5)) {
           new_timeout = 0;
@@ -2203,33 +2773,67 @@ int main(int argc, char** argv) {
       goto next_getch;
     }
     case KEY_RESIZE: {
-      int term_height = getmaxy(stdscr);
-      int term_width = getmaxx(stdscr);
-      assert(term_height >= 0 && term_width >= 0);
-      int content_y = 0;
-      int content_x = 0;
-      int content_h = term_height;
-      int content_w = term_width;
-      int margins_2 = margin_thickness * 2;
-      if (margin_thickness > 0 && term_height > margins_2 &&
-          term_width > margins_2) {
-        content_y += margin_thickness;
-        content_x += margin_thickness;
-        content_h -= margins_2;
-        content_w -= margins_2;
+      int term_h, term_w;
+      getmaxyx(stdscr, term_h, term_w);
+      assert(term_h >= 0 && term_w >= 0);
+      int content_y = 0, content_x = 0;
+      int content_h = term_h, content_w = term_w;
+      if (hardmargin_y > 0 && term_h > hardmargin_y * 2 + 2) {
+        content_y += hardmargin_y;
+        content_h -= hardmargin_y * 2;
       }
-      if (cont_window == NULL || getmaxy(cont_window) != content_h ||
-          getmaxx(cont_window) != content_w) {
+      if (hardmargin_x > 0 && term_w > hardmargin_x * 2 + 2) {
+        content_x += hardmargin_x;
+        content_w -= hardmargin_x * 2;
+      }
+      bool remake_window = true;
+      if (cont_window) {
+        int cwin_y, cwin_x, cwin_h, cwin_w;
+        getbegyx(cont_window, cwin_y, cwin_x);
+        getmaxyx(cont_window, cwin_h, cwin_w);
+        remake_window = cwin_y != content_y || cwin_x != content_x ||
+                        cwin_h != content_h || cwin_w != content_w;
+      }
+      if (remake_window) {
         if (cont_window) {
           delwin(cont_window);
         }
         wclear(stdscr);
         cont_window =
             derwin(stdscr, content_h, content_w, content_y, content_x);
-        ged_set_window_size(&ged_state, content_h, content_w);
+        ged_state.is_draw_dirty = true;
       }
+      // We might do this once soon after startup if the user specified neither
+      // a starting grid size or a file to open. See above (search KEY_RESIZE)
+      // for why this is kind of messy and hacky -- we'll be changing this
+      // again before too long, so we haven't made too much of an attempt to
+      // keep it non-messy.
+      if (should_autosize_grid) {
+        should_autosize_grid = false;
+        Usz new_field_h, new_field_w;
+        if (ged_suggest_nice_grid_size(
+                content_h, content_w, softmargin_y, softmargin_x,
+                (int)ged_state.ruler_spacing_y, (int)ged_state.ruler_spacing_x,
+                &new_field_h, &new_field_w)) {
+          field_init_fill(&ged_state.field, (Usz)new_field_h, (Usz)new_field_w,
+                          '.');
+          mbuf_reusable_ensure_size(&ged_state.mbuf_r, new_field_h,
+                                    new_field_w);
+          ged_make_cursor_visible(&ged_state);
+        } else {
+          field_init_fill(&ged_state.field, (Usz)init_grid_dim_y,
+                          (Usz)init_grid_dim_x, '.');
+        }
+      }
+      // OK to call this unconditionally -- deriving the sub-window areas is
+      // more than a single comparison, and we don't want to split up or
+      // duplicate the math and checks for it, so this routine will calculate
+      // the stuff it needs to and then early-out if there's no further work.
+      ged_set_window_size(&ged_state, content_h, content_w, softmargin_y,
+                          softmargin_x);
       goto next_getch;
     }
+#ifndef FEAT_NOMOUSE
     case KEY_MOUSE: {
       MEVENT mevent;
       if (cont_window && getmouse(&mevent) == OK) {
@@ -2251,12 +2855,13 @@ int main(int argc, char** argv) {
       }
       goto next_getch;
     }
-    case CTRL_PLUS('q'):
-      goto quit;
+#endif
     }
 
     Qblock* qb = qnav_top_block();
     if (qb) {
+      if (key == CTRL_PLUS('q'))
+        goto quit;
       switch (qb->tag) {
       case Qblock_type_qmsg: {
         Qmsg* qm = qmsg_of(qb);
@@ -2279,23 +2884,128 @@ int main(int argc, char** argv) {
             qnav_stack_pop();
           } break;
           case Qmenu_action_type_picked: {
-            if (qmenu_id(qm) == Main_menu_id) {
+            switch (qmenu_id(qm)) {
+            case Main_menu_id: {
               switch (act.picked.id) {
               case Main_menu_quit:
                 goto quit;
               case Main_menu_controls:
                 push_controls_msg();
                 break;
+              case Main_menu_opers_guide:
+                push_opers_guide_msg();
+                break;
               case Main_menu_about:
                 push_about_msg();
                 break;
+              case Main_menu_new:
+                push_confirm_new_file_menu();
+                break;
+              case Main_menu_open:
+                push_open_form(sddc(file_name));
+                break;
               case Main_menu_save:
-                try_save_with_msg(&ged_state);
+                if (sdd_len(file_name) > 0) {
+                  try_save_with_msg(&ged_state.field, file_name);
+                } else {
+                  push_save_as_form("");
+                }
                 break;
               case Main_menu_save_as:
-                push_save_as_form(file_name.str);
+                push_save_as_form(sddc(file_name));
+                break;
+              case Main_menu_set_tempo:
+                push_set_tempo_form(ged_state.bpm);
+                break;
+              case Main_menu_set_grid_dims:
+                push_set_grid_dims_form(ged_state.field.height,
+                                        ged_state.field.width);
+                break;
+              case Main_menu_autofit_grid:
+                push_autofit_menu();
+                break;
+#ifdef FEAT_PORTMIDI
+              case Main_menu_choose_portmidi_output:
+                push_portmidi_output_device_menu(&midi_mode);
+                break;
+#endif
+              }
+            } break;
+            case Autofit_menu_id: {
+              Usz new_field_h, new_field_w;
+              bool did_get_ok_size = false;
+              switch (act.picked.id) {
+              case Autofit_nicely_id:
+                did_get_ok_size = ged_suggest_nice_grid_size(
+                    ged_state.win_h, ged_state.win_w, ged_state.softmargin_y,
+                    ged_state.softmargin_x, (int)ged_state.ruler_spacing_y,
+                    (int)ged_state.ruler_spacing_x, &new_field_h, &new_field_w);
+                break;
+              case Autofit_tightly_id:
+                did_get_ok_size = ged_suggest_tight_grid_size(
+                    ged_state.win_h, ged_state.win_w, ged_state.softmargin_y,
+                    ged_state.softmargin_x, &new_field_h, &new_field_w);
                 break;
               }
+              if (did_get_ok_size) {
+                ged_resize_grid(&ged_state.field, &ged_state.mbuf_r,
+                                new_field_h, new_field_w, ged_state.tick_num,
+                                &ged_state.scratch_field, &ged_state.undo_hist,
+                                &ged_state.ged_cursor);
+                ged_update_internal_geometry(&ged_state);
+                ged_state.needs_remarking = true;
+                ged_state.is_draw_dirty = true;
+                ged_make_cursor_visible(&ged_state);
+              }
+              qnav_stack_pop();
+              pop_qnav_if_main_menu();
+            } break;
+            case Confirm_new_file_menu_id: {
+              switch (act.picked.id) {
+              case Confirm_new_file_reject_id:
+                qnav_stack_pop();
+                break;
+              case Confirm_new_file_accep_id: {
+                Usz new_field_h, new_field_w;
+                if (ged_suggest_nice_grid_size(ged_state.win_h, ged_state.win_w,
+                                               ged_state.softmargin_y,
+                                               ged_state.softmargin_x,
+                                               (int)ged_state.ruler_spacing_y,
+                                               (int)ged_state.ruler_spacing_x,
+                                               &new_field_h, &new_field_w)) {
+                  undo_history_push(&ged_state.undo_hist, &ged_state.field,
+                                    ged_state.tick_num);
+                  field_resize_raw(&ged_state.field, new_field_h, new_field_w);
+                  memset(ged_state.field.buffer, '.',
+                         new_field_h * new_field_w * sizeof(Glyph));
+                  ged_cursor_confine(&ged_state.ged_cursor, new_field_h,
+                                     new_field_w);
+                  mbuf_reusable_ensure_size(&ged_state.mbuf_r, new_field_h,
+                                            new_field_w);
+                  ged_update_internal_geometry(&ged_state);
+                  ged_make_cursor_visible(&ged_state);
+                  ged_state.needs_remarking = true;
+                  ged_state.is_draw_dirty = true;
+                  sdd_clear(file_name);
+                  ged_state.filename = "unnamed"; // slightly redundant
+                  qnav_stack_pop();
+                  pop_qnav_if_main_menu();
+                }
+              } break;
+              }
+            } break;
+#ifdef FEAT_PORTMIDI
+            case Portmidi_output_device_menu_id: {
+              midi_mode_deinit(&midi_mode);
+              PmError pme = midi_mode_init_portmidi(&midi_mode, act.picked.id);
+              qnav_stack_pop();
+              if (pme) {
+                qmsg_printf_push("PortMidi Error",
+                                 "Error setting PortMidi output device:\n%s",
+                                 Pm_GetErrorText(pme));
+              }
+            } break;
+#endif
             }
           } break;
           }
@@ -2311,17 +3021,88 @@ int main(int argc, char** argv) {
             break;
           case Qform_action_type_submitted: {
             switch (qform_id(qf)) {
-            case Save_as_form_id: {
-              Heapstr temp_name;
-              heapstr_init(&temp_name);
-              if (qform_get_text_line(qf, Save_as_name_id, &temp_name) &&
-                  heapstr_len(&temp_name) > 0) {
-                qnav_stack_pop();
-                heapstr_set_cstr(&file_name, temp_name.str);
-                ged_state.filename = file_name.str;
-                try_save_with_msg(&ged_state);
+            case Open_form_id: {
+              sdd* temp_name = NULL;
+              if (qform_get_text_line(qf, Open_name_text_line_id, &temp_name) &&
+                  sdd_len(temp_name) > 0) {
+                undo_history_push(&ged_state.undo_hist, &ged_state.field,
+                                  ged_state.tick_num);
+                Field_load_error fle =
+                    field_load_file(sddc(temp_name), &ged_state.field);
+                if (fle == Field_load_error_ok) {
+                  qnav_stack_pop();
+                  file_name = sdd_cpysdd(file_name, temp_name);
+                  ged_state.filename = sddc(file_name);
+                  mbuf_reusable_ensure_size(&ged_state.mbuf_r,
+                                            ged_state.field.height,
+                                            ged_state.field.width);
+                  ged_cursor_confine(&ged_state.ged_cursor,
+                                     ged_state.field.height,
+                                     ged_state.field.width);
+                  ged_update_internal_geometry(&ged_state);
+                  ged_make_cursor_visible(&ged_state);
+                  ged_state.needs_remarking = true;
+                  ged_state.is_draw_dirty = true;
+                  pop_qnav_if_main_menu();
+                } else {
+                  undo_history_pop(&ged_state.undo_hist, &ged_state.field,
+                                   &ged_state.tick_num);
+                  qmsg_printf_push("Error Loading File", "%s:\n%s",
+                                   sddc(temp_name),
+                                   field_load_error_string(fle));
+                }
               }
-              heapstr_deinit(&temp_name);
+              sdd_free(temp_name);
+            } break;
+            case Save_as_form_id: {
+              sdd* temp_name = NULL;
+              if (qform_get_text_line(qf, Save_as_name_id, &temp_name) &&
+                  sdd_len(temp_name) > 0) {
+                qnav_stack_pop();
+                bool saved_ok = try_save_with_msg(&ged_state.field, temp_name);
+                if (saved_ok) {
+                  file_name = sdd_cpysdd(file_name, temp_name);
+                  ged_state.filename = sddc(file_name);
+                }
+              }
+              sdd_free(temp_name);
+            } break;
+            case Set_tempo_form_id: {
+              sdd* tmpstr = NULL;
+              if (qform_get_text_line(qf, Tempo_text_line_id, &tmpstr) &&
+                  sdd_len(tmpstr) > 0) {
+                int newbpm = atoi(sddc(tmpstr));
+                if (newbpm > 0) {
+                  ged_state.bpm = (Usz)newbpm;
+                  qnav_stack_pop();
+                }
+              }
+              sdd_free(tmpstr);
+            } break;
+            case Set_grid_dims_form_id: {
+              sdd* tmpstr = NULL;
+              if (qform_get_text_line(qf, Tempo_text_line_id, &tmpstr) &&
+                  sdd_len(tmpstr) > 0) {
+                int newheight, newwidth;
+                if (sscanf(sddc(tmpstr), "%dx%d", &newwidth, &newheight) == 2 &&
+                    newheight > 0 && newwidth > 0 && newheight < ORCA_Y_MAX &&
+                    newwidth < ORCA_X_MAX) {
+                  if (ged_state.field.height != (Usz)newheight ||
+                      ged_state.field.width != (Usz)newwidth) {
+                    ged_resize_grid(
+                        &ged_state.field, &ged_state.mbuf_r, (Usz)newheight,
+                        (Usz)newwidth, ged_state.tick_num,
+                        &ged_state.scratch_field, &ged_state.undo_hist,
+                        &ged_state.ged_cursor);
+                    ged_update_internal_geometry(&ged_state);
+                    ged_state.needs_remarking = true;
+                    ged_state.is_draw_dirty = true;
+                    ged_make_cursor_visible(&ged_state);
+                  }
+                  qnav_stack_pop();
+                }
+              }
+              sdd_free(tmpstr);
             } break;
             }
           } break;
@@ -2332,24 +3113,90 @@ int main(int argc, char** argv) {
       goto next_getch;
     }
 
+    // If this key input is intended to reach the grid, check to see if we're
+    // in bracketed paste and use alternate 'filtered input for characters'
+    // mode. We'll ignore most control sequences here.
+    if (is_in_bracketed_paste) {
+      if (key == 27 /* escape */) {
+        if (bracketed_paste_sequence_getch_ungetch(stdscr) ==
+            Bracketed_paste_sequence_end) {
+          is_in_bracketed_paste = false;
+          if (bracketed_paste_max_y > ged_state.ged_cursor.y)
+            ged_state.ged_cursor.h =
+                bracketed_paste_max_y - ged_state.ged_cursor.y + 1;
+          if (bracketed_paste_max_x > ged_state.ged_cursor.x)
+            ged_state.ged_cursor.w =
+                bracketed_paste_max_x - ged_state.ged_cursor.x + 1;
+          ged_state.needs_remarking = true;
+          ged_state.is_draw_dirty = true;
+        }
+        goto next_getch;
+      }
+      if (key == KEY_ENTER)
+        key = '\r';
+      if (key >= CHAR_MIN && key <= CHAR_MAX) {
+        if ((char)key == '\r' || (char)key == '\n') {
+          bracketed_paste_x = bracketed_paste_starting_x;
+          ++bracketed_paste_y;
+          goto next_getch;
+        }
+        if (key != ' ') {
+          char cleaned = (char)key;
+          if (!is_valid_glyph((Glyph)key))
+            cleaned = '.';
+          if (bracketed_paste_y < ged_state.field.height &&
+              bracketed_paste_x < ged_state.field.width) {
+            gbuffer_poke(ged_state.field.buffer, ged_state.field.height,
+                         ged_state.field.width, bracketed_paste_y,
+                         bracketed_paste_x, cleaned);
+            // Could move this out one level if we wanted the final selection
+            // size to reflect even the pasted area which didn't fit on the
+            // grid.
+            if (bracketed_paste_y > bracketed_paste_max_y)
+              bracketed_paste_max_y = bracketed_paste_y;
+            if (bracketed_paste_x > bracketed_paste_max_x)
+              bracketed_paste_max_x = bracketed_paste_x;
+          }
+        }
+        ++bracketed_paste_x;
+      }
+      goto next_getch;
+    }
+
+    // Regular inputs when we're not in a menu and not in bracketed paste.
     switch (key) {
+    // Checking again for 'quit' here, because it's only listened for if we're
+    // in the menus or *not* in bracketed paste mode.
+    case CTRL_PLUS('q'):
+      goto quit;
+    case CTRL_PLUS('o'):
+      push_open_form(sddc(file_name));
+      break;
     case KEY_UP:
     case CTRL_PLUS('k'):
-      ged_dir_input(&ged_state, Ged_dir_up);
+      ged_dir_input(&ged_state, Ged_dir_up, 1);
       break;
     case CTRL_PLUS('j'):
     case KEY_DOWN:
-      ged_dir_input(&ged_state, Ged_dir_down);
+      ged_dir_input(&ged_state, Ged_dir_down, 1);
       break;
     case 127: // backspace in terminal.app, apparently
     case KEY_BACKSPACE:
+      if (ged_state.input_mode == Ged_input_mode_append) {
+        ged_dir_input(&ged_state, Ged_dir_left, 1);
+        ged_input_character(&ged_state, '.');
+        ged_dir_input(&ged_state, Ged_dir_left, 1);
+      } else {
+        ged_input_character(&ged_state, '.');
+      }
+      break;
     case CTRL_PLUS('h'):
     case KEY_LEFT:
-      ged_dir_input(&ged_state, Ged_dir_left);
+      ged_dir_input(&ged_state, Ged_dir_left, 1);
       break;
     case CTRL_PLUS('l'):
     case KEY_RIGHT:
-      ged_dir_input(&ged_state, Ged_dir_right);
+      ged_dir_input(&ged_state, Ged_dir_right, 1);
       break;
     case CTRL_PLUS('z'):
     case CTRL_PLUS('u'):
@@ -2381,10 +3228,14 @@ int main(int argc, char** argv) {
       break;
     case '\r':
     case KEY_ENTER:
+      // Currently unused. Formerly was the toggle for insert/append mode.
+      break;
+    case CTRL_PLUS('i'):
+    case KEY_IC:
       ged_input_cmd(&ged_state, Ged_input_cmd_toggle_append_mode);
       break;
     case '/':
-      ged_input_cmd(&ged_state, Ged_input_cmd_toggle_piano_mode);
+      // Currently unused. Formerly 'piano'/trigger mode toggle.
       break;
     case '<':
       ged_adjust_bpm(&ged_state, -1);
@@ -2400,15 +3251,52 @@ int main(int argc, char** argv) {
       break;
     case CTRL_PLUS('x'):
       ged_input_cmd(&ged_state, Ged_input_cmd_cut);
+      try_send_to_gui_clipboard(&ged_state, &use_gui_cboard);
       break;
     case CTRL_PLUS('c'):
       ged_input_cmd(&ged_state, Ged_input_cmd_copy);
+      try_send_to_gui_clipboard(&ged_state, &use_gui_cboard);
       break;
     case CTRL_PLUS('v'):
-      ged_input_cmd(&ged_state, Ged_input_cmd_paste);
+      if (use_gui_cboard) {
+        undo_history_push(&ged_state.undo_hist, &ged_state.field,
+                          ged_state.tick_num);
+        Usz pasted_h, pasted_w;
+        Cboard_error cberr =
+            cboard_paste(ged_state.field.buffer, ged_state.field.height,
+                         ged_state.field.width, ged_state.ged_cursor.y,
+                         ged_state.ged_cursor.x, &pasted_h, &pasted_w);
+        if (cberr) {
+          undo_history_pop(&ged_state.undo_hist, &ged_state.field,
+                           &ged_state.tick_num);
+          switch (cberr) {
+          case Cboard_error_none:
+            break;
+          case Cboard_error_unavailable:
+          case Cboard_error_popen_failed:
+          case Cboard_error_process_exit_error:
+            break;
+          }
+          use_gui_cboard = false;
+          ged_input_cmd(&ged_state, Ged_input_cmd_paste);
+        } else {
+          if (pasted_h > 0 && pasted_w > 0) {
+            ged_state.ged_cursor.h = pasted_h;
+            ged_state.ged_cursor.w = pasted_w;
+          }
+        }
+        ged_state.needs_remarking = true;
+        ged_state.is_draw_dirty = true;
+      } else {
+        ged_input_cmd(&ged_state, Ged_input_cmd_paste);
+      }
       break;
     case '\'':
       ged_input_cmd(&ged_state, Ged_input_cmd_toggle_selresize_mode);
+      break;
+    case '`':
+    case '~':
+      ged_input_cmd(&ged_state, Ged_input_cmd_toggle_slide_mode);
       break;
     case ' ':
       if (ged_state.input_mode == Ged_input_mode_append) {
@@ -2417,9 +3305,23 @@ int main(int argc, char** argv) {
         ged_input_cmd(&ged_state, Ged_input_cmd_toggle_play_pause);
       }
       break;
-    case 27: // Escape
+    case 27: { // Escape
+      // Check for escape sequences we're interested in that ncurses didn't
+      // handle.
+      if (bracketed_paste_sequence_getch_ungetch(stdscr) ==
+          Bracketed_paste_sequence_begin) {
+        is_in_bracketed_paste = true;
+        undo_history_push(&ged_state.undo_hist, &ged_state.field,
+                          ged_state.tick_num);
+        bracketed_paste_y = ged_state.ged_cursor.y;
+        bracketed_paste_x = ged_state.ged_cursor.x;
+        bracketed_paste_starting_x = bracketed_paste_x;
+        bracketed_paste_max_y = bracketed_paste_y;
+        bracketed_paste_max_x = bracketed_paste_x;
+        break;
+      }
       ged_input_cmd(&ged_state, Ged_input_cmd_escape);
-      break;
+    } break;
 
     // Selection size modification. These may not work in all terminals. (Only
     // tested in xterm so far.)
@@ -2435,9 +3337,49 @@ int main(int argc, char** argv) {
     case 402: // shift-right
       ged_modify_selection_size(&ged_state, 0, 1);
       break;
+    case 567: // shift-control-up
+      ged_modify_selection_size(&ged_state, -(int)ged_state.ruler_spacing_y, 0);
+      break;
+    case 526: // shift-control-down
+      ged_modify_selection_size(&ged_state, (int)ged_state.ruler_spacing_y, 0);
+      break;
+    case 546: // shift-control-left
+      ged_modify_selection_size(&ged_state, 0, -(int)ged_state.ruler_spacing_x);
+      break;
+    case 561: // shift-control-right
+      ged_modify_selection_size(&ged_state, 0, (int)ged_state.ruler_spacing_x);
+      break;
 
     case 330: // delete?
       ged_input_character(&ged_state, '.');
+      break;
+
+    // Jump on control-arrow
+    case 566: // control-up
+      ged_dir_input(&ged_state, Ged_dir_up, (int)ged_state.ruler_spacing_y);
+      break;
+    case 525: // control-down
+      ged_dir_input(&ged_state, Ged_dir_down, (int)ged_state.ruler_spacing_y);
+      break;
+    case 545: // control-left
+      ged_dir_input(&ged_state, Ged_dir_left, (int)ged_state.ruler_spacing_x);
+      break;
+    case 560: // control-right
+      ged_dir_input(&ged_state, Ged_dir_right, (int)ged_state.ruler_spacing_x);
+      break;
+
+    // Slide selection on alt-arrow
+    case 564: // alt-up
+      ged_slide_selection(&ged_state, -1, 0);
+      break;
+    case 523: // alt-down
+      ged_slide_selection(&ged_state, 1, 0);
+      break;
+    case 543: // alt-left
+      ged_slide_selection(&ged_state, 0, -1);
+      break;
+    case 558: // alt-right
+      ged_slide_selection(&ged_state, 0, 1);
       break;
 
     case CTRL_PLUS('d'):
@@ -2447,8 +3389,16 @@ int main(int argc, char** argv) {
     case '?':
       push_controls_msg();
       break;
+    case CTRL_PLUS('g'):
+      push_opers_guide_msg();
+      break;
     case CTRL_PLUS('s'):
-      try_save_with_msg(&ged_state);
+      // TODO duplicated with menu item code
+      if (sdd_len(file_name) > 0) {
+        try_save_with_msg(&ged_state.field, file_name);
+      } else {
+        push_save_as_form("");
+      }
       break;
 
     default:
@@ -2475,12 +3425,14 @@ quit:
   if (cont_window) {
     delwin(cont_window);
   }
+  printf("\033[?2004h\n"); // Tell terminal to not use bracketed paste
   endwin();
   ged_deinit(&ged_state);
-  heapstr_deinit(&file_name);
+  sdd_free(file_name);
   midi_mode_deinit(&midi_mode);
 #ifdef FEAT_PORTMIDI
-  Pm_Terminate();
+  if (portmidi_is_initialized)
+    Pm_Terminate();
 #endif
   return 0;
 }

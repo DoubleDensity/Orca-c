@@ -1,7 +1,7 @@
 #include "bank.h"
 #include "base.h"
 #include "field.h"
-#include "mark.h"
+#include "gbuffer.h"
 #include "sim.h"
 #include <getopt.h>
 
@@ -103,8 +103,10 @@ int main(int argc, char** argv) {
   oevent_list_init(&oevent_list);
   Usz max_ticks = (Usz)ticks;
   for (Usz i = 0; i < max_ticks; ++i) {
+    mbuffer_clear(mbuf_r.buffer, field.height, field.width);
+    oevent_list_clear(&oevent_list);
     orca_run(field.buffer, mbuf_r.buffer, field.height, field.width, i,
-             &oevent_list, ORCA_PIANO_BITS_NONE);
+             &oevent_list, 0);
   }
   mbuf_reusable_deinit(&mbuf_r);
   oevent_list_deinit(&oevent_list);

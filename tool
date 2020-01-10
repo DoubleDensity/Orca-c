@@ -3,35 +3,51 @@ set -eu -o pipefail
 
 print_usage() {
 cat <<EOF
-Usage: tool [options] command [args]
+Usage: tool <command> [options] [arguments]
+Example:
+    tool build --portmidi orca
 Commands:
-    build <config> <target>
-        Compile orca.
-        Configs: debug, release
+    build <target>
+        Compiles the livecoding environment or the CLI tool.
         Targets: orca, cli
-        Output: build/<config>/<target>
+        Output: build/<target>
     clean
         Removes build/
     info
         Prints information about the detected build environment.
+    help
+        Prints this message and exits.
 Options:
-    -v            Print important commands as they're executed.
-    -c <name>     Use a specific compiler binary.
-                  Default: \$CC, or cc
-    -d            Enable compiler safeguards like -fstack-protector.
-                  You should probably do this if you plan to give the
-                  compiled binary to other people.
-    --static      Build static binary.
-    --pie         Enable PIE (ASLR).
-                  Note: --pie and --static cannot be mixed.
-    -s            Print statistics about compile time and binary size.
-    -h or --help  Print this message and exit.
+    -c <name>      Use a specific compiler binary. Default: \$CC, or cc
+    -d             Build with debug features. Output changed to:
+                   build/debug/<target>
+    --harden       Enable compiler safeguards like -fstack-protector.
+                   You should probably do this if you plan to give the
+                   compiled binary to other people.
+    --static       Build static binary.
+    --pie          Enable PIE (ASLR).
+                   Note: --pie and --static cannot be mixed.
+    -s             Print statistics about compile time and binary size.
+    -v             Print important commands as they're executed.
+    -h or --help   Print this message and exit.
 Optional Features:
-    --portmidi    Enable hardware MIDI output support with PortMIDI.
-                  Default: not enabled
-                  Note: PortMIDI has memory leaks and bugs.
+    --portmidi     Enable or disable hardware MIDI output support with
+    --no-portmidi  PortMidi. Note: PortMidi has memory leaks and bugs.
+                   Default: disabled.
+    --mouse        Enable or disable mouse features in the livecoding
+    --no-mouse     environment.
+                   Default: enabled.
 EOF
 }
+
+if [[ -z "${1:-}" ]]; then
+  echo "Error: Command required" >&2
+  print_usage >&2
+  exit 1
+fi
+
+cmd=$1
+shift
 
 os=
 case $(uname -s | awk '{print tolower($0)}') in
@@ -51,15 +67,21 @@ stats_enabled=0
 pie_enabled=0
 static_enabled=0
 portmidi_enabled=0
+mouse_disabled=0
+config_mode=release
 
 while getopts c:dhsv-: opt_val; do
   case "$opt_val" in
     -)
       case "$OPTARG" in
+        harden) protections_enabled=1;;
         help) print_usage; exit 0;;
         static) static_enabled=1;;
         pie) pie_enabled=1;;
         portmidi) portmidi_enabled=1;;
+        no-portmidi|noportmidi) portmidi_enabled=0;;
+        mouse) mouse_disabled=0;;
+        no-mouse|nomouse) mouse_disabled=1;;
         *)
           echo "Unknown long option --$OPTARG" >&2
           print_usage >&2
@@ -68,7 +90,7 @@ while getopts c:dhsv-: opt_val; do
       esac
       ;;
     c) cc_exe="$OPTARG";;
-    d) protections_enabled=1;;
+    d) config_mode=debug;;
     h) print_usage; exit 0;;
     s) stats_enabled=1;;
     v) verbose=1;;
@@ -142,6 +164,8 @@ if cc_vers=$(echo -e '#ifndef __clang__\n#error Not found\n#endif\n__clang_major
   fi
 elif cc_vers=$(echo -e '#ifndef __GNUC__\n#error Not found\n#endif\n__GNUC__.__GNUC_MINOR__.__GNUC_PATCHLEVEL__' | "$cc_exe" -E -xc - 2>/dev/null | tail -n 1 | tr -d '\040'); then
   cc_id=gcc
+elif cc_vers=$(echo -e '#ifndef __TINYC__\n#error Not found\n#endif\n__TINYC__' | "$cc_exe" -E -xc - 2>/dev/null | tail -n 1 | tr -d '\040'); then
+  cc_id=tcc
 fi
 
 if [[ -z $cc_id ]]; then
@@ -199,14 +223,19 @@ try_make_dir() {
 build_dir=build
 
 build_target() {
-  local build_subdir
   local cc_flags=()
   local libraries=()
   local source_files=()
   local out_exe
-  add cc_flags -std=c99 -pipe -finput-charset=UTF-8 -Wall -Wpedantic -Wextra
+  add cc_flags -std=c99 -pipe -finput-charset=UTF-8 -Wall -Wpedantic -Wextra \
+    -Wwrite-strings
   if cc_id_and_vers_gte gcc 6.0.0 || cc_id_and_vers_gte clang 3.9.0; then
-    add cc_flags -Wconversion -Wstrict-prototypes -Werror=implicit-function-declaration -Werror=implicit-int -Werror=incompatible-pointer-types -Werror=int-conversion
+    add cc_flags -Wconversion -Wshadow -Wstrict-prototypes \
+      -Werror=implicit-function-declaration -Werror=implicit-int \
+      -Werror=incompatible-pointer-types -Werror=int-conversion
+  fi
+  if [[ $cc_id = tcc ]]; then
+    add cc_flags -Wunsupported
   fi
   if [[ $lld_detected = 1 ]]; then
     add cc_flags -fuse-ld=lld
@@ -223,9 +252,8 @@ build_target() {
   if [[ $static_enabled = 1 ]]; then
     add cc_flags -static
   fi
-  case "$1" in
+  case $config_mode in
     debug)
-      build_subdir=debug
       add cc_flags -DDEBUG -ggdb
       # cygwin gcc doesn't seem to have this stuff, just elide for now
       if [[ $os != cygwin ]]; then
@@ -242,22 +270,30 @@ build_target() {
         # least
         # add cc_flags -fsanitize=leak
       fi
+      case $cc_id in
+        tcc) add cc_flags -g -bt 10;;
+      esac
       ;;
     release)
-      build_subdir=release
       add cc_flags -DNDEBUG -O2 -g0
       if [[ $protections_enabled != 1 ]]; then
-        add cc_flags -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector
+        add cc_flags -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
+        case $cc_id in
+          gcc|clang) add cc_flags -fno-stack-protector;;
+        esac
       fi
       if [[ $os = mac ]]; then
         # todo some stripping option
         true
       else
         # -flto is good on both clang and gcc on Linux
-        add cc_flags -flto -s
+        case $cc_id in
+          gcc|clang) add cc_flags -flto;;
+        esac
+        add cc_flags -s
       fi
       ;;
-    *) fatal "Unknown build config \"$1\"";;
+    *) fatal "Unknown build config \"$config_mode\"";;
   esac
 
   case $arch in
@@ -281,14 +317,14 @@ build_target() {
       ;;
   esac
 
-  add source_files gbuffer.c field.c mark.c bank.c sim.c
-  case "$2" in
+  add source_files gbuffer.c field.c bank.c sim.c
+  case $1 in
     cli)
       add source_files cli_main.c
       out_exe=cli
       ;;
     orca|tui)
-      add source_files osc_out.c term_util.c tui_main.c
+      add source_files osc_out.c term_util.c sysmisc.c thirdparty/sdd.c tui_main.c
       add cc_flags -D_XOPEN_SOURCE_EXTENDED=1
       # thirdparty headers (like sokol_time.h) should get -isystem for their
       # include dir so that any warnings they generate with our warning flags
@@ -316,7 +352,7 @@ build_target() {
           if [[ $portmidi_enabled = 1 ]]; then
             local portmidi_dir="$brew_prefix/opt/portmidi"
             if ! [[ -d "$portmidi_dir" ]]; then
-              echo "Error: PortMIDI directory not found at $portmidi_dir" >&2
+              echo "Error: PortMidi directory not found at $portmidi_dir" >&2
               echo "Install with: brew install portmidi" >&2
               exit 1
             fi
@@ -334,15 +370,25 @@ build_target() {
       if [[ $portmidi_enabled = 1 ]]; then
         add libraries -lportmidi
         add cc_flags -DFEAT_PORTMIDI
-        if [[ $1 = debug ]]; then
-          echo -e "Warning: The PortMIDI library contains bugs.\\nIt may trigger address sanitizer in debug builds.\\nThese are not bugs in orca." >&2
+        if [[ $config_mode = debug ]]; then
+          echo -e "Warning: The PortMidi library contains code that may trigger address sanitizer in debug builds.\\nThese are not bugs in orca." >&2
         fi
       fi
+      if [[ $mouse_disabled = 1 ]]; then
+        add cc_flags -DFEAT_NOMOUSE
+      fi
+      ;;
+    *)
+      echo -e "Unknown build target '$1'\\nValid targets: orca, cli" >&2
+      exit 1
       ;;
   esac
   try_make_dir "$build_dir"
-  try_make_dir "$build_dir/$build_subdir"
-  local out_path=$build_dir/$build_subdir/$out_exe
+  if [[ $config_mode = debug ]]; then
+    build_dir=$build_dir/debug
+    try_make_dir "$build_dir"
+  fi
+  local out_path=$build_dir/$out_exe
   # bash versions quirk: empty arrays might give error on expansion, use +
   # trick to avoid expanding second operand
   verbose_echo timed_stats "$cc_exe" "${cc_flags[@]}" -o "$out_path" "${source_files[@]}" ${libraries[@]+"${libraries[@]}"}
@@ -371,34 +417,38 @@ EOF
 
 shift $((OPTIND - 1))
 
-if [[ -z "${1:-}" ]]; then
-  echo "Error: Command required" >&2
-  print_usage >&2
-  exit 1
-fi
-
-case "$1" in
+case $cmd in
   info)
     if [[ "$#" -gt 1 ]]; then
       fatal "Too many arguments for 'info'"
     fi
-    print_info
-    exit 0
-    ;;
+    print_info; exit 0;;
   build)
-    if [[ "$#" -lt 3 ]]; then
+    if [[ "$#" -lt 1 ]]; then
       fatal "Too few arguments for 'build'"
     fi
-    if [[ "$#" -gt 3 ]]; then
-      fatal "Too many arguments for 'build'"
+    if [[ "$#" -gt 1 ]]; then
+      echo "Too many arguments for 'build'" >&2
+      echo "The syntax has changed. Updated usage examples:" >&2
+      echo "./tool build --portmidi orca   (release)" >&2
+      echo "./tool build -d orca           (debug)" >&2
+      exit 1
     fi
-    build_target "$2" "$3"
+    build_target "$1"
     ;;
   clean)
     if [[ -d "$build_dir" ]]; then
       verbose_echo rm -rf "$build_dir"
     fi
     ;;
-  *) fatal "Unrecognized command $1";;
+  help) print_usage; exit 0;;
+  -*)
+    echo "The syntax has changed for the 'tool' build script." >&2
+    echo "The options now need to come after the command name." >&2
+    echo "Do it like this instead:" >&2
+    echo "./tool build --portmidi orca" >&2
+    exit 1
+    ;;
+  *) fatal "Unrecognized command $cmd";;
 esac
 
