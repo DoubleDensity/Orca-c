@@ -14,8 +14,7 @@ jobs:
         - brew install portmidi ncurses
       script:
         - ./tool build --portmidi --mouse orca
-        - ls -R build
-        - mv -v build/release/orca orca_c-darwin-amd64
+        - mv -v build/orca orca_c-darwin-amd64
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
@@ -34,7 +33,7 @@ jobs:
       sudo: true
       script:
         - "docker run -i -v \"${PWD}:/orca\" --workdir=/orca ubuntu:14.04 /bin/bash -c \"apt-get -y update && apt-get install -y gcc libncurses-dev libncursesw5-dev libportmidi-dev && ./tool build --portmidi --static --harden --mouse orca\""
-        - sudo mv -v build/release/orca orca_c-linux-amd64
+        - sudo mv -v build/orca orca_c-linux-amd64
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
@@ -53,7 +52,7 @@ jobs:
       sudo: true
       script:
         - "docker run -i -v \"${PWD}:/orca\" --workdir=/orca i386/ubuntu:14.04 /bin/bash -c \"apt-get -y update && apt-get install -y gcc libncurses-dev libncursesw5-dev libportmidi-dev && linux32 --32bit i386 ./tool build --portmidi --static --harden --mouse orca\""
-        - sudo mv -v build/release/orca orca_c-linux-i386
+        - sudo mv -v build/orca orca_c-linux-i386
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
@@ -73,7 +72,7 @@ jobs:
         - choco install cygwin cyg-get; /c/ProgramData/chocolatey/bin/cyg-get.bat gcc-core libncurses-devel libportmidi-devel
       script:
         - /c/tools/cygwin/bin/bash.exe -lc '(gcc --version && pushd $TRAVIS_BUILD_DIR && dos2unix tool && ./tool build --portmidi --static --harden --mouse orca)'
-        - mv -v build/release/orca.exe orca_c-windows-amd64.exe
+        - mv -v build/orca.exe orca_c-windows-amd64.exe
       deploy:
         provider: releases
         name: Build $(date +'%d.%m.%Y')_$TRAVIS_BUILD_NUMBER
